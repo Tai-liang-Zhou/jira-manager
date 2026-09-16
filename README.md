@@ -38,6 +38,15 @@ Copy `.env.example` to `.env` and fill in the values, or export the equivalent e
 | `JIRA_STORY_POINTS_FIELD` | no | Override for the auto-detected "Story Points" custom field ID |
 | `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` | no | Standard Go proxy environment variables, for routing Jira requests through an outbound proxy |
 
+**Finding your `JIRA_PROJECT_KEY`:** it's the prefix on every issue in the project (e.g. `PROJ` in `PROJ-123`). You can also find it in the project's URL (`.../projects/PROJ/summary`), on the project's "Details" page under Project settings, or via the API:
+
+```sh
+curl -H "Authorization: Bearer $JIRA_PAT" \
+  "$JIRA_BASE_URL/rest/api/2/project" | jq '.[] | {key, name}'
+```
+
+The key must match exactly (case and spelling) what Jira shows — this server is scoped to a single project.
+
 ## Build & run
 
 ```sh
