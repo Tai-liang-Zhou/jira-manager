@@ -4,8 +4,9 @@ package main
 import (
 	"context"
 	"crypto/subtle"
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -23,9 +24,12 @@ import (
 var _ tools.JiraClient = (*jira.Client)(nil)
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
 	}
 
 	client := jira.NewClient(cfg.JiraBaseURL, cfg.JiraPAT, cfg.JiraProjectKey)
@@ -33,7 +37,8 @@ func main() {
 	startupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := client.ResolveFields(startupCtx, cfg.EpicLinkFieldOverride, cfg.StoryPointsFieldOverride); err != nil {
-		log.Fatalf("jira: %v", err)
+		slog.Error("failed to resolve Jira custom fields", "error", err)
+		os.Exit(1)
 	}
 
 	handlers := tools.NewHandlers(client)
@@ -67,9 +72,10 @@ func main() {
 	authMiddleware := auth.RequireBearerToken(staticTokenVerifier(cfg.MCPAuthToken), nil)
 
 	addr := ":" + cfg.Port
-	log.Printf("jira-mcp-server listening on %s", addr)
+	slog.Info("jira-mcp-server listening", "addr", addr)
 	if err := http.ListenAndServe(addr, authMiddleware(mcpHandler)); err != nil {
-		log.Fatalf("http server: %v", err)
+		slog.Error("http server exited", "error", err)
+		os.Exit(1)
 	}
 }
 
