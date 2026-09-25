@@ -1,5 +1,7 @@
 # /jira-manager
 
+English | [繁體中文](README.zh-TW.md)
+
 A Claude Code Skill for working with a Jira Server/Data Center project's **Epic → Task → Sub-task** hierarchy. It has two capabilities:
 
 - **Placement** puts the work you're about to do in the right place. It reuses suitable issues, creates the missing levels, and sets Story Points. It shows you a Placement Plan first and writes nothing until you confirm.
