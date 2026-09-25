@@ -1,120 +1,38 @@
-# Jira MCP Server
+# /jira-place
 
-An [MCP](https://modelcontextprotocol.io) server, written in Go, that exposes a Jira Server/Data Center project's **Epic → Task → Sub-task** workflow as tools an AI assistant (e.g. Claude) can call directly — list epics, create tasks and sub-tasks, and set story-point estimates, without leaving the conversation.
-
-It runs as a standalone HTTP service (not stdio), so it can be hosted centrally and reused across sessions/clients.
-
-## Features
-
-- **`list_epics`** — list every Epic in the configured Jira project
-- **`create_task`** — create a Task under a given Epic
-- **`create_subtask`** — create a Sub-task under a given Task
-- **`set_subtask_points`** — set the story-point estimate on a Sub-task
-- **`list_subtasks`** — list the Sub-tasks under a Task, with their point estimates
-- Auto-detects the "Epic Link" and "Story Points" custom field IDs at startup (with manual override if detection fails)
-- Bearer-token authentication on the HTTP endpoint, independent of the Jira Personal Access Token
-- Automatic retry with backoff for transient Jira API failures (5xx, 429); non-transient errors (4xx) fail immediately
-- Outbound requests to Jira honor the standard `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` environment variables
-
-See [SPEC.md](SPEC.md) for the full problem statement and user stories behind this design.
-
-## Requirements
-
-- Go 1.26+
-- A Jira Server/Data Center instance and a [Personal Access Token](https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html) for it
-
-## Configuration
-
-Copy `.env.example` to `.env` and fill in the values, or export the equivalent environment variables:
-
-| Variable | Required | Description |
-|---|---|---|
-| `JIRA_BASE_URL` | yes | Base URL of your Jira Server/Data Center instance |
-| `JIRA_PAT` | yes | Jira Personal Access Token |
-| `JIRA_PROJECT_KEY` | yes | The single project this server is scoped to |
-| `MCP_AUTH_TOKEN` | yes | Bearer token clients must present to call this server |
-| `PORT` | no | HTTP port to listen on (default `8080`) |
-| `JIRA_EPIC_LINK_FIELD` | no | Override for the auto-detected "Epic Link" custom field ID |
-| `JIRA_STORY_POINTS_FIELD` | no | Override for the auto-detected "Story Points" custom field ID |
-| `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` | no | Standard Go proxy environment variables, for routing Jira requests through an outbound proxy |
-
-**Finding your `JIRA_PROJECT_KEY`:** it's the prefix on every issue in the project (e.g. `PROJ` in `PROJ-123`). You can also find it in the project's URL (`.../projects/PROJ/summary`), on the project's "Details" page under Project settings, or via the API:
-
-```sh
-curl -H "Authorization: Bearer $JIRA_PAT" \
-  "$JIRA_BASE_URL/rest/api/2/project" | jq '.[] | {key, name}'
-```
-
-The key must match exactly (case and spelling) what Jira shows — this server is scoped to a single project.
-
-## Build & run
-
-```sh
-make build   # build the binary into bin/jira-mcp-server
-make run     # build and run
-make test    # run all tests with race detection
-make fmt     # gofmt
-make vet     # go vet
-```
-
-Or directly:
-
-```sh
-go run ./cmd/server
-```
-
-The binary reads configuration directly from the process environment — it does **not** load `.env` automatically. Export the variables first, e.g. by sourcing your `.env` file:
-
-```sh
-set -a; source .env; set +a
-./bin/jira-mcp-server
-```
-
-or pass them inline for a one-off run:
-
-```sh
-JIRA_BASE_URL=https://jira.example.com \
-JIRA_PAT=your_pat \
-JIRA_PROJECT_KEY=PROJ \
-MCP_AUTH_TOKEN=your_token \
-./bin/jira-mcp-server
-```
-
-`make run` builds and runs the binary the same way, so the environment must already be exported before invoking it too.
-
-On startup, the server resolves the Jira custom field IDs, registers its MCP tools, and listens on `:$PORT`. Every request must include an `Authorization: Bearer <MCP_AUTH_TOKEN>` header.
-
-## Client configuration
-
-The server speaks MCP over streamable HTTP at the root path (e.g. `http://localhost:8080`), so any MCP client that supports a remote/HTTP transport can connect.
-
-### opencode
-
-Add it to `opencode.json` (project root) or `~/.config/opencode/opencode.json` (global):
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "jira": {
-      "type": "remote",
-      "url": "http://localhost:8080",
-      "enabled": true,
-      "headers": {
-        "Authorization": "Bearer {env:MCP_AUTH_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-`{env:MCP_AUTH_TOKEN}` reads the token from the environment at runtime instead of hardcoding it. Point `url` at the server's actual host if it's not running locally.
-
-## Project layout
+A Claude Code Skill that places the work you're about to do into a Jira Server/Data Center project's **Epic → Task → Sub-task** hierarchy. It reuses suitable issues, creates the missing levels, and sets Story Points. It shows you a Placement Plan first and writes nothing until you confirm.
 
 ```
-cmd/server/         entrypoint: wires config, Jira client, and MCP tools into an HTTP server
-internal/config/    environment-variable configuration loading
-internal/jira/      Jira REST API v2 client (auth, retries, field resolution, issue operations)
-internal/tools/     MCP tool handlers, one file per tool
+/jira-place 我今天要處理 v2.3 的 QA 任務，2 點
 ```
+
+It needs no Personal Access Token or API token: you log in to Jira in a real browser, and the Skill drives [`playwright-cli`](https://github.com/microsoft/playwright-cli) to call Jira's REST API with that browser session. There is no code of our own to build or run.
+
+- [SPEC.md](SPEC.md) / [SPEC.zh-TW.md](SPEC.zh-TW.md): full specification (English / 繁體中文)
+- [CONTEXT.md](CONTEXT.md): glossary (Work Item, Placement, Placement Plan, Own Issue, …)
+- [docs/adr/](docs/adr/): why browser-session auth (0001) and why `playwright-cli` with no script (0003)
+
+## Setup
+
+1. Install `playwright-cli`:
+   ```sh
+   npm install -g @playwright/cli@latest
+   ```
+2. Install the Skill by symlinking it into your user skills, so `/jira-place` works from any directory:
+   ```sh
+   ln -s "$PWD/skills/jira-place" ~/.claude/skills/jira-place
+   ```
+3. Run `/jira-place` in Claude Code. On first run it asks for your Jira base URL and project key, and saves them to `~/.config/jira-placement/config.json`. It then opens a browser for you to log in (SSO/MFA included) and detects the "Epic Link", "Epic Name" and "Story Points" custom field IDs.
+
+**Finding your project key:** it's the prefix on every issue in the project (e.g. `PROJ` in `PROJ-123`), also visible in the project URL (`.../projects/PROJ/summary`).
+
+## Files outside the repo
+
+| Path | What it is |
+|---|---|
+| `~/.config/jira-placement/config.json` | Base URL, project key and cached custom field IDs. Edit the field IDs here if auto-detection picks the wrong field. |
+| `~/.config/jira-placement/profile/` | The persistent browser profile holding your Jira login. **Treat it as a credential**: never commit or share it. Delete it to log out. |
+
+## Verifying
+
+`skills/jira-place/examples.md` lists sample Work Items with their expected Placement Plans. For the first run against a real project, use a Work Item that only reuses existing issues, so you can check the session, field IDs and tree before anything is created.

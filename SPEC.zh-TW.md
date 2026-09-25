@@ -12,12 +12,13 @@
 
 ## 解決方案
 
-一個 Claude Code Skill（`/jira-place`），加上一支使用官方 `playwright` 函式庫的 TypeScript 命令列腳本。
+一個直接操作 `playwright-cli` 的 Claude Code Skill（`/jira-place`），不需要我們自己維護任何腳本（ADR 0003）。
 
-- 使用者在 Playwright 開啟的瀏覽器中登入 Jira 一次（SSO/MFA 由使用者自己完成）。腳本把 session 存成 `storageState`，之後用這些 cookie 呼叫 REST API v2，不需要開瀏覽器（ADR 0001）。
+- Skill 會在一個持久化的瀏覽器 profile 上，開啟名為 `jira` 的 `playwright-cli` session。使用者在有頭的視窗中登入一次（SSO/MFA 由使用者自己完成），之後的執行都會沿用這個 profile 裡的登入狀態（ADR 0001）。
+- 所有對 Jira 的讀寫，都是在 `playwright-cli eval` 裡用 `fetch` 呼叫 REST API v2。這些請求在已登入的頁面中以同源方式執行，會自動帶上 session cookie。每一種呼叫的 JavaScript 都是 Skill 目錄裡固定的參考片段。
 - 使用者用一或多個 Work Item 呼叫 `/jira-place`，例如 `/jira-place 我今天要處理 v2.3 的 QA 任務，2 點`。
-- Skill（Claude）從腳本讀取 Open 的 Issue 樹，對每個 Work Item 做 Placement，並產出一份合併的 **Placement Plan**。計畫中會說明要沿用或新建哪個 Epic、Task、Sub-task，以及 Story Points（使用者沒給時由 Claude 提供建議值）。
-- 使用者確認計畫之後，Claude 把計畫寫成 JSON 檔，由腳本的 `apply` 指令執行（ADR 0002）。
+- Claude 讀取 Open 的 Issue 樹，對每個 Work Item 做 Placement，並產出一份合併的 **Placement Plan**。計畫中會說明要沿用或新建哪個 Epic、Task、Sub-task，以及 Story Points（使用者沒給時由 Claude 提供建議值）。
+- 使用者確認之後，Claude 依序執行計畫中的步驟，並回報每一步的結果。
 
 ## 使用者故事
 
@@ -39,67 +40,59 @@
 
 ## 實作決策
 
-**執行環境**
-- TypeScript，Node 20.6 以上，用 `npx tsx` 執行。存取 Jira 唯一的執行期依賴是官方的 `playwright` 套件。
-- 刪除 Go MCP server（`cmd/`、`internal/`、`go.mod`、`Makefile`），保留在 git 歷史中。
+**工具**
+- 唯一的執行期依賴是 `playwright-cli`（`@playwright/cli`，由使用者自行全域安裝）。Skill 會先檢查它是否存在；如果沒有安裝，就提供安裝指令並停止。
+- 刪除 Go MCP server，保留在 git 歷史中。這個 repo 裡沒有任何腳本或套件。
+
+**Skill 結構**
+- `skills/jira-place/SKILL.md`：workflow 流程與 Placement 規則。設定 `disable-model-invocation: true`，所以只有 `/jira-place` 能啟動它。
+- `skills/jira-place/references/jira-rest.md`：固定的 JavaScript 片段，包括 session 檢查、欄位解析、Issue 樹、Issue 位置查詢和寫入。Claude 只負責填入佔位符，並透過加了引號的 heredoc 執行，確保 shell 不會改動片段內容。
+- `skills/jira-place/examples.md`：一棵範例 Issue 樹，搭配多個 Work Item 及對應的預期 Placement Plan。
+- 安裝方式是把 `skills/jira-place` symlink 到 `~/.claude/skills/jira-place`。
 
 **Jira 目標與認證**
 - Jira Server/Data Center、REST API v2、單一專案。
-- `login` 先用 `GET /rest/api/2/myself` 檢查已保存的 session。如果沒有回 200，就開一個有頭的 Chromium 前往 `JIRA_BASE_URL`，等到該瀏覽器環境中的 `/rest/api/2/myself` 回 200，再儲存 `storageState`。
-- session 檔存放在 repo 外的 `~/.config/jira-placement/auth.json`，權限為 `600`。
-- 其他指令都用 `request.newContext({ baseURL, storageState })`，不開瀏覽器。寫入請求會帶上 `X-Atlassian-Token: no-check`。
-- 如果指令發現 session 已過期，會以一個專用的錯誤結束，告訴 Skill 去執行 `login`。
+- Session 的開啟方式是 `playwright-cli -s=jira open <baseUrl> --browser=chrome --profile=~/.config/jira-placement/profile`；如果沒有安裝 Chrome，就改用內建的 Chromium。session 檢查失敗時，Skill 會加上 `--headed` 重新開啟，等使用者登入。Claude 絕不代為輸入帳密。
+- session 過期的判斷方式：收到 401，或是在預期 JSON 的地方收到 HTML（SSO 或登入頁）。
+- 寫入請求會帶上 `X-Atlassian-Token: no-check`，這是用 cookie 認證寫入時的必要設定。
 
 **設定**
-- 設定放在 repo 內的 `.env`，由腳本自行載入：
-  - `JIRA_BASE_URL`（必填）
-  - `JIRA_PROJECT_KEY`（必填）
-  - `JIRA_EPIC_LINK_FIELD`、`JIRA_EPIC_NAME_FIELD`、`JIRA_STORY_POINTS_FIELD`（選填，覆寫用）
-- 「Epic Link」、「Epic Name」、「Story Points」這三個 custom field 的 ID，除非被覆寫，否則透過 `GET /rest/api/2/field` 依顯示名稱解析。如果某個欄位解析不到，指令會失敗並給出清楚的錯誤訊息。
+- `~/.config/jira-placement/config.json` 存放 `baseUrl`、`projectKey` 和 `fields`（`epicLink`、`epicName`、`storyPoints` 三個 custom field 的 ID）。第一次執行時，Skill 會詢問 base URL 和專案 key。
+- 欄位 ID 透過 `GET /rest/api/2/field` 依顯示名稱（「Epic Link」、「Epic Name」、「Story Points」）解析，並快取在設定檔中。如果自動偵測失敗，使用者可以直接在設定檔裡修改。
 - Issue type 名稱固定使用標準英文：`"Epic"`、`"Task"`、`"Sub-task"`。
 
-**腳本指令**（全部以 JSON 輸出到 stdout）
-- `login`：確保 session 有效，並輸出目前登入的使用者。
-- `tree [--include-done]`：輸出目前使用者和 Epic → Task → Sub-task 樹。每個 Epic 和 Task 包含 key、summary、截斷後的 description、fixVersions、labels、assignee、status。每個 Sub-task 包含 key、summary、assignee、status 和 Story Points（未設定時為 null）。預設只包含 Open 的 Issue。
-- `issue <KEY>`：輸出單一 Issue 的類型、summary、status、assignee，以及它的 parent Task 和 Epic（如果有的話）。Skill 處理 Referenced Issue 時會用到。
-- `apply <plan.json>`：執行一份 Placement Plan（格式見下），並輸出每一步的結果。
+**讀取**
+- Issue 樹：用一次 `eval` 執行三個有分頁的 `POST /rest/api/2/search` 查詢，分別查 Epic、Task、Sub-task。每個查詢都限定在專案內，而且除非要求包含 Done，否則加上 `statusCategory != Done`。回傳結果包含 `me` 和巢狀的樹。每個 Epic 和 Task 有 key、summary、截斷到 300 字元的 description、fixVersions、labels、assignee、status。Task 和 Sub-task 有 `own` 標記，Sub-task 另外有 Story Points（未設定時為 null）。沒有 Epic 的 Task 會另外列出。
+- Issue 位置：查詢 Referenced Issue 的類型、是否屬於階層、狀態與歸屬，以及它的 parent Task 和 Epic。
 
-**Placement Plan 格式**（`apply` 的輸入）
-- 由有順序的步驟組成。每一步是以下其中之一：`createEpic`、`createTask`、`createSubtask`、`setPoints`、`linkRelates`。
-- 建立 Issue 的步驟會帶一個本地的 `ref`（例如 `"new-task-1"`）。後面的步驟可以用真實單號或 `ref` 指向某個 Issue，多個 Work Item 就是靠這個方式共用同一個新建的 Task。
-- 新建的 Task 和 Sub-task 指派給目前使用者。新建的 Epic 也指派給目前使用者，並設定 Epic Name。
-- 步驟依序執行，遇到第一個失敗就停止。輸出會把每一步標成 `done`（附建立的單號）、`failed`（附 Jira 的錯誤訊息）或 `skipped`。不做任何回滾。
+**Placement Plan**
+- 一張依序排列的步驟表。每一步是以下其中之一：`createEpic`（summary、epicName）、`createTask`（epic、summary）、`createSubtask`（parent、summary）、`setPoints`（issue、points）、`linkRelates`（from、to）。
+- 建立型的步驟會帶一個小寫的 `ref`。後面的步驟可以指向真實單號，或前面步驟定義過的 ref，多個 Work Item 就是靠這個方式共用同一個新建的 Task。
+- 新建的 Issue 都指派給目前使用者。新建的 Epic 會設定 Epic Name。
+- 第一次寫入之前，Claude 會先檢查整份計畫：op 是否合法、必填欄位是否齊全、點數是否為非負數、ref 是否唯一且在使用前已定義。
+- 步驟依序執行。遇到 5xx 或 429 時最多再重試 2 次（間隔 1 秒、2 秒）。遇到 401 時暫停，讓使用者重新登入後，再從同一步繼續。其他錯誤一律停止執行：後面的步驟跳過，已完成的也不回滾。
+- 最後的報告會把每一步標成 done（附單號）、failed（附 Jira 的錯誤訊息）或 skipped，並附上每個 Sub-task 的瀏覽連結。
 
-**Skill（`/jira-place`）**
-- 原始碼放在 repo 的 `skills/jira-place/SKILL.md`，並用 symlink 連到 `~/.claude/skills/jira-place`。設定 `disable-model-invocation: true`。
-- 用絕對路徑呼叫腳本。
-- Skill 依照以下順序套用 Placement 規則：
-  1. 如果 Work Item 含有單號，就用這個 Referenced Issue 的位置。如果它不屬於 Epic/Task/Sub-task 階層（例如 Bug），就標示出來並詢問使用者。
-  2. 否則，用語意將 Work Item 與 Open 的 Epic 和 Task 比對。
-  3. 吻合的 Task 只有在它是 Own Issue 時才沿用。否則它就是 Related Task：在它的 Epic 底下建立一個 Own Task，並用「relates to」連結。
-  4. 吻合的 Sub-task 只有在它是 Open 且為 Own Issue 時才沿用。如果它已經有 Story Points，一律不修改。
-  5. 只有一個明顯吻合時，直接提議它。有好幾個說得通時，提供最多 3 個附理由的選項，再加上「新建」。完全沒有吻合時，提議建立缺少的層級；如果要新建 Epic，就加上 ⚠ 標示。
-- 合併的 Placement Plan 會列出每個 Work Item 對應的 Epic、Task、Sub-task（沿用或新建）、Story Points（使用者沒給時標示為建議值），以及所有要建立的連結。
-- 使用者確認之前，不會寫入任何東西。
-
-**重試策略**
-- 遇到 5xx、網路錯誤和 429 時重試，最多再試 2 次，採用指數退避。遇到 4xx 時立即失敗，並回傳 Jira 的錯誤訊息。
+**Placement 規則**（依以下順序套用；確切文字見 `SKILL.md`）
+1. Referenced Issue 依它在樹中的位置決定 Placement。如果它不屬於階層（例如 Bug）或已經 Done，就標示出來並詢問使用者。
+2. 否則，用語意將 Work Item 與 Open 的 Epic 和 Task 比對。
+3. 吻合的 Task 只有在它是 Own Issue 時才沿用。否則它就是 Related Task：在它的 Epic 底下規劃一個新的 Own Task，並用「relates to」連結。沒有指派人的 Task 也算不是自己的。
+4. 吻合的 Sub-task 只有在它是 Open 且為 Own Issue 時才沿用。已經設定的點數絕不修改。
+5. 只有一個明顯吻合時直接提議；有好幾個時，列出最多 3 個附理由的候選，再加上「新建」；完全沒有吻合時，建立缺少的層級，新建 Epic 時加上 ⚠。
+6. 缺少 Story Points 時，提醒使用者並提供建議值：1 點 = 1 天；取所選 Task 底下已估點 Sub-task 的中位數，沒有可參考的 Sub-task 時依工作內容以天數估計，四捨五入到小數點後一位。
 
 ## 測試決策
 
-- **測試縫（seam）**：單一的 `JiraApi` 介面（`myself`、`fields`、`search`、`getIssue`、`createIssue`、`linkIssues`、`updateIssue`），有一個 HTTP 實作，以及一個測試用的記憶體內 fake 實作。
-- **風格**：用 Vitest 寫表格驅動測試，驗證指令的輸出以及對 `JiraApi` 的呼叫，不驗證內部實作細節。
-- **受測模組：**
-  - `apply`：步驟順序；`ref` 解析；多個 Work Item 共用同一個新建的 Task；第 N 步失敗時停止，並正確回報 done/failed/skipped；建立時設定 assignee 和 Epic Name。
-  - `tree`：預設排除 Done 的 Issue，加上 `--include-done` 時包含；階層組裝正確；未設定點數的 Sub-task 回報為 null。
-  - 欄位解析：依名稱偵測、覆寫值優先、欄位不存在時給出清楚的錯誤。
-  - 重試策略：暫時性與非暫時性失敗的區分，以及重試次數。
-- **不做自動化測試的部分：** Skill 的 Placement 判斷。`skills/jira-place/examples.md` 收錄範例 Work Item 和對應的預期 Placement Plan，用來手動驗證。HTTP 版的 `JiraApi` 實作則對著真實的 Jira 手動驗證。
+- 沒有程式碼，所以沒有單元測試。workflow 的正確性建立在固定的片段和 `SKILL.md` 中的規則上。
+- `references/jira-rest.md` 裡的每個片段都必須能被解析為合法的 JavaScript 函式（修改檔案時做一次語法檢查）。heredoc 加上 `eval` 的執行方式，已經對一個公開的 JSON API 做過端到端驗證，包含中日韓文字、引號和 `$`。
+- Placement 判斷和計畫執行，都依照 `skills/jira-place/examples.md` 手動驗證，包括執行到一半失敗的情況。
+- 第一次對公司的 Jira 實際執行時，應該用一個只會沿用既有 Issue、不會寫入任何東西的 Work Item，先確認 session、欄位 ID 和 Issue 樹都正確，再建立任何 Issue。
 
 ## 不在範圍內
 
 - PAT、API token 或 OAuth 認證。
 - 透過點擊操作 Jira UI（除非透過 session 呼叫 REST 的方式有一天被封鎖；見 ADR 0001）。
+- 維護我們自己的腳本或套件（見 ADR 0003）。
 - Jira Cloud 和多專案支援。
 - 從一般對話中自動觸發 Skill。
 - 回滾只執行了一部分的計畫，或刪除 Issue。
@@ -110,6 +103,6 @@
 
 ## 補充說明
 
-- session 檔等同於登入憑證，絕對不能 commit 或分享出去。
-- session 的有效期限由公司的 Jira/SSO 設定決定。過期時，Skill 會執行 `login`，使用者再登入一次即可。
-- 如果 Jira 中的「Epic Link」、「Epic Name」或「Story Points」欄位被改名，自動偵測就會失效；環境變數的覆寫值就是為了這種情況而設計的。
+- profile 目錄 `~/.config/jira-placement/profile` 等同於登入憑證，絕對不能 commit、複製或分享出去。
+- session 的有效期限由公司的 Jira/SSO 設定決定。過期時，Skill 會以有頭模式重新開啟瀏覽器，讓使用者再登入一次。
+- 計畫的安全規則（先驗證、依序執行、失敗就停）是寫給 Claude 的指示，不是程式碼。如果發現 Claude 沒有遵守這些規則，就是該重新檢討 ADR 0003、把 `apply` 改回腳本的訊號。

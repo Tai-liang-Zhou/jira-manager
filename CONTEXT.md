@@ -47,5 +47,5 @@ An Issue whose status category is not Done. Only Open Issues are candidates for 
 _Avoid_: active, unresolved
 
 **Story Points**:
-A free-form numeric effort estimate, recorded only on Sub-tasks.
+A numeric effort estimate in days (1 point = 1 day of work, typically fractions such as 0.3, 0.5, 0.7, 1.0), recorded only on Sub-tasks.
 _Avoid_: estimate, points on Tasks/Epics

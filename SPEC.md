@@ -12,12 +12,13 @@ An earlier Go MCP server automated the Jira calls, but it authenticated with a P
 
 ## Solution
 
-A Claude Code Skill (`/jira-place`) plus a TypeScript command-line script built on the official `playwright` library.
+A Claude Code Skill (`/jira-place`) that drives `playwright-cli` directly, with no script of our own (ADR 0003).
 
-- The user logs in to Jira once in a Playwright-driven browser (handling SSO/MFA themselves). The script saves the session as `storageState` and makes all REST API v2 calls with those cookies, without opening a browser (ADR 0001).
+- The Skill opens a named `playwright-cli` session (`jira`) on a persistent browser profile. The user logs in once in a headed window (handling SSO/MFA themselves), and the profile keeps the login for later runs (ADR 0001).
+- All Jira reads and writes are REST API v2 calls made with `fetch` inside `playwright-cli eval`. They run same-origin in the logged-in page and carry its session cookies. The JavaScript for each call is a fixed reference snippet in the Skill directory.
 - The user invokes `/jira-place` with one or more Work Items, e.g. `/jira-place 我今天要處理 v2.3 的 QA 任務，2 點`.
-- The Skill (Claude) reads the Open issue tree from the script, performs Placement for each Work Item, and presents a single **Placement Plan**. The plan says which Epic, Task and Sub-task to reuse or create and gives Story Points, suggested by Claude if the user gave none.
-- After the user confirms the plan, Claude writes it to a JSON file and the script's `apply` command executes it (ADR 0002).
+- Claude reads the Open issue tree, performs Placement for each Work Item, and presents one combined **Placement Plan**. The plan says which Epic, Task and Sub-task to reuse or create and gives Story Points, suggested by Claude if the user gave none.
+- After the user confirms, Claude executes the plan's steps in order and reports the result of each.
 
 ## User Stories
 
@@ -39,67 +40,59 @@ A Claude Code Skill (`/jira-place`) plus a TypeScript command-line script built 
 
 ## Implementation Decisions
 
-**Runtime**
-- TypeScript on Node (≥ 20.6), run with `npx tsx`. The only runtime dependency for Jira access is the official `playwright` package.
-- The Go MCP server (`cmd/`, `internal/`, `go.mod`, `Makefile`) is removed; it remains in git history.
+**Tooling**
+- `playwright-cli` (`@playwright/cli`, installed globally by the user) is the only runtime dependency. The Skill checks for it and stops with install instructions if it's missing.
+- The Go MCP server is removed; it remains in git history. There is no script or package in this repo.
+
+**Skill layout**
+- `skills/jira-place/SKILL.md`: the workflow and Placement rules. It sets `disable-model-invocation: true`, so only `/jira-place` starts it.
+- `skills/jira-place/references/jira-rest.md`: fixed JavaScript snippets for the session check, field resolution, tree, issue position and writes. Claude only fills in placeholders, and runs each snippet through a quoted heredoc so the shell never alters it.
+- `skills/jira-place/examples.md`: a fixture tree with Work Items and their expected Placement Plans.
+- It is installed by symlinking `skills/jira-place` to `~/.claude/skills/jira-place`.
 
 **Jira target & authentication**
 - Jira Server/Data Center, REST API v2, single project.
-- `login` first checks the saved session with `GET /rest/api/2/myself`. If that isn't 200, it launches a headed Chromium at `JIRA_BASE_URL`, waits until `/rest/api/2/myself` returns 200 in that browser context, and saves `storageState`.
-- The session file is stored at `~/.config/jira-placement/auth.json` with mode `600`, outside the repo.
-- All other commands use `request.newContext({ baseURL, storageState })` and never open a browser. Write requests send `X-Atlassian-Token: no-check`.
-- If a command finds the session expired, it exits with a distinct error telling the Skill to run `login`.
+- Session: `playwright-cli -s=jira open <baseUrl> --browser=chrome --profile=~/.config/jira-placement/profile`, falling back to bundled Chromium if Chrome is missing. If the session check fails, the Skill reopens with `--headed` and waits for the user to log in. Claude never types credentials.
+- An expired session shows up as a 401, or as HTML (an SSO/login page) where JSON was expected.
+- Writes send `X-Atlassian-Token: no-check`, which is required for cookie-authenticated writes.
 
 **Configuration**
-- `.env` in the repo, loaded by the script itself:
-  - `JIRA_BASE_URL` (required)
-  - `JIRA_PROJECT_KEY` (required)
-  - `JIRA_EPIC_LINK_FIELD`, `JIRA_EPIC_NAME_FIELD`, `JIRA_STORY_POINTS_FIELD` (optional overrides)
-- Custom field IDs for "Epic Link", "Epic Name" and "Story Points" are resolved from `GET /rest/api/2/field` by display name, unless overridden. If a field can't be resolved, the command fails with a clear error.
+- `~/.config/jira-placement/config.json` holds `baseUrl`, `projectKey` and `fields` (the `epicLink`, `epicName` and `storyPoints` custom field IDs). On first run, the Skill asks for the base URL and project key.
+- Field IDs are resolved from `GET /rest/api/2/field` by display name ("Epic Link", "Epic Name", "Story Points") and cached in the config. The user can edit them there if detection fails.
 - Issue type names are the standard English `"Epic"`, `"Task"`, `"Sub-task"`.
 
-**Script commands** (all output JSON on stdout)
-- `login`: ensures a valid session and outputs the current user.
-- `tree [--include-done]`: outputs the current user plus the Epic → Task → Sub-task tree. Each Epic and Task has key, summary, truncated description, fixVersions, labels, assignee and status. Each Sub-task has key, summary, assignee, status and Story Points (null if unset). By default only Open issues are included.
-- `issue <KEY>`: outputs one issue's type, summary, status and assignee, plus its parent Task and Epic if it has them. The Skill uses it for Referenced Issues.
-- `apply <plan.json>`: executes a Placement Plan (see below) and outputs the result of each step.
+**Reading**
+- Tree: one `eval` runs three paginated `POST /rest/api/2/search` queries (Epics, Tasks, Sub-tasks, each scoped to the project and to `statusCategory != Done` unless Done issues are requested). It returns `me` plus the nested tree. Each Epic and Task has key, summary, a description truncated to 300 characters, fixVersions, labels, assignee and status. Tasks and Sub-tasks have an `own` flag, and Sub-tasks have Story Points (null if unset). Tasks with no Epic are returned separately.
+- Issue position: for a Referenced Issue, its type, whether it is in the hierarchy, its status and ownership, plus its parent Task and Epic.
 
-**Placement Plan format** (the input to `apply`)
-- An ordered list of steps. Each step is one of: `createEpic`, `createTask`, `createSubtask`, `setPoints`, `linkRelates`.
-- A step that creates an issue has a local `ref` (e.g. `"new-task-1"`). Later steps can point at an issue by real key or by `ref`, which is how several Work Items share one new Task.
-- New Tasks and Sub-tasks are assigned to the current user. New Epics are assigned to the current user, and their Epic Name is set.
-- Steps run in order and stop at the first failure. The output lists each step as `done` (with the created key), `failed` (with Jira's error) or `skipped`. Nothing is rolled back.
+**Placement Plan**
+- A table of ordered steps. Each step is one of `createEpic` (summary, epicName), `createTask` (epic, summary), `createSubtask` (parent, summary), `setPoints` (issue, points) or `linkRelates` (from, to).
+- Create steps carry a lowercase `ref`. Later steps target a real key or a ref defined by an earlier step, which is how several Work Items share one new Task.
+- New issues are assigned to the current user. New Epics get an Epic Name.
+- Before the first write, Claude checks the whole plan (known ops, required fields, non-negative points, unique refs defined before use).
+- Steps run in order. 5xx/429 are retried up to 2 more times (1s, 2s backoff). A 401 pauses for re-login and then resumes from that step. Any other error stops execution: later steps are skipped and nothing is rolled back.
+- The final report lists each step as done (with key), failed (with Jira's message) or skipped, plus a browse link for every Sub-task.
 
-**Skill (`/jira-place`)**
-- Source lives in the repo at `skills/jira-place/SKILL.md` and is symlinked to `~/.claude/skills/jira-place`. It sets `disable-model-invocation: true`.
-- It calls the script by absolute path.
-- Placement rules, in the order the Skill applies them:
-  1. If the Work Item contains an issue key, use that Referenced Issue's position. If it is outside the Epic/Task/Sub-task hierarchy (e.g. a Bug), flag it and ask the user.
-  2. Otherwise match the Work Item semantically against Open Epics and Tasks.
-  3. A matching Task is reused only if it is an Own Issue. Otherwise it becomes a Related Task: create an Own Task under its Epic and link it with "relates to".
-  4. A matching Sub-task is reused only if it is Open and an Own Issue. It is never modified if it already has Story Points.
-  5. If there is one clear match, propose it. If several are plausible, offer at most 3 with reasons plus "create new". If nothing matches, propose creating the missing levels, with a ⚠ marker on a new Epic.
-- The combined Placement Plan shows each Work Item's Epic, Task and Sub-task (reuse or create), the Story Points (marked as suggested when the user gave none), and every link to be created.
-- Nothing is written until the user confirms.
-
-**Retry policy**
-- Retry on 5xx, network errors and 429, up to 2 additional attempts with exponential backoff. 4xx responses fail immediately with Jira's error message.
+**Placement rules** (applied in this order; see `SKILL.md` for the exact wording)
+1. A Referenced Issue decides Placement by its position. If it is outside the hierarchy (e.g. Bug) or Done, it is flagged and the user is asked.
+2. Otherwise the Work Item is matched semantically against Open Epics and Tasks.
+3. A matching Task is reused only if it is an Own Issue. Otherwise it is a Related Task: a new Own Task is planned under its Epic and linked with "relates to". Unassigned counts as not own.
+4. A matching Sub-task is reused only if it is Open and an Own Issue. Points that are already set are never changed.
+5. One clear match → propose it. Several → at most 3 candidates with reasons plus "create new". None → create the missing levels, with ⚠ on a new Epic.
+6. Missing Story Points → remind the user and suggest a value: 1 point = 1 day; the median of the chosen Task's estimated Sub-tasks, or an estimate in days when it has none, rounded to one decimal place.
 
 ## Testing Decisions
 
-- **Seam:** a single `JiraApi` interface (`myself`, `fields`, `search`, `getIssue`, `createIssue`, `linkIssues`, `updateIssue`) with an HTTP implementation and a fake in-memory implementation for tests.
-- **Style:** table-driven Vitest tests that assert on command output and on the calls made to `JiraApi`, not on internal details.
-- **Modules tested:**
-  - `apply`: step ordering; `ref` resolution; several Work Items sharing one new Task; stop at failure on step N with a correct done/failed/skipped report; assignee and Epic Name set on creation.
-  - `tree`: Done issues excluded by default and included with `--include-done`; correct hierarchy assembly; Sub-tasks with unset points reported as null.
-  - Field resolution: detection by name, override precedence, and a clear error when a field is missing.
-  - Retry policy: transient vs. non-transient failures and retry counts.
-- **Not tested automatically:** the Skill's Placement judgement. `skills/jira-place/examples.md` holds sample Work Items with their expected Placement Plans for manual verification. The HTTP `JiraApi` implementation is verified manually against the real Jira.
+- There is no code, so there are no unit tests. The workflow's correctness rests on the fixed snippets and the rules in `SKILL.md`.
+- Every snippet in `references/jira-rest.md` must parse as a JavaScript function (checked by a syntax pass when the file is edited). The heredoc + `eval` path has been checked end to end against a public JSON API, including CJK text, quotes and `$`.
+- Placement judgement and plan execution are verified manually against `skills/jira-place/examples.md`, including the partial-failure case.
+- The first real run against the company Jira should use a Work Item that only reuses existing issues (no writes), to confirm the session, field IDs and tree before any issue is created.
 
 ## Out of Scope
 
 - PAT, API-token or OAuth authentication.
 - Driving the Jira UI by clicking (only if REST via session is ever blocked; see ADR 0001).
+- Maintaining a script or package of our own (see ADR 0003).
 - Jira Cloud and multi-project support.
 - Auto-triggering the Skill from casual conversation.
 - Rolling back partially applied plans, or deleting issues.
@@ -110,6 +103,6 @@ A Claude Code Skill (`/jira-place`) plus a TypeScript command-line script built 
 
 ## Further Notes
 
-- The session file is equivalent to a login credential and must never be committed or shared.
-- Session lifetime is controlled by the company's Jira/SSO configuration. When it expires, the Skill runs `login` and the user logs in again.
-- Renaming the "Epic Link", "Epic Name" or "Story Points" fields in Jira breaks auto-detection; the environment overrides exist for that case.
+- The profile directory `~/.config/jira-placement/profile` is equivalent to a login credential and must never be committed, copied or shared.
+- Session lifetime is controlled by the company's Jira/SSO configuration. When it expires, the Skill reopens the browser headed for the user to log in again.
+- The plan-safety rules (validate first, in order, stop on failure) are instructions, not code. If Claude is ever seen deviating from them, that is the signal to revisit ADR 0003 and bring back a script for `apply`.

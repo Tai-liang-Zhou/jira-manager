@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0003
+---
+
 # Replace the Go MCP server with a Claude Code Skill plus a TypeScript Playwright script
 
 The original Go MCP server authenticated with a PAT, which is no longer allowed (see ADR 0001). Rather than port it, we split the workflow in two: a TypeScript script using the official `playwright` library performs the fixed Jira operations (login, list tree, create issues, set points) and prints JSON, and a Claude Code Skill handles judgement — deciding whether a suitable Epic/Task/Sub-task already exists — and calls the script. The Go code is removed; it remains in git history.
