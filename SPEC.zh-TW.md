@@ -37,6 +37,10 @@
 13. 身為使用者，我希望能列出 Open 的 Epic → Task → Sub-task 樹，也可以選擇把 Done 的 Issue 一起列出，方便我檢視專案結構。
 14. 身為使用者，我希望只有在保存的 session 過期時，才需要透過真的瀏覽器重新登入，而不是每次執行都要登入。
 15. 身為使用者，我希望 `/jira-manager` 在任何目錄都能使用，但只有在我明確呼叫時才會啟動，這樣隨口一句話不會意外啟動一個會寫入 Jira 的 workflow。
+16. 身為使用者，我希望看到團隊 Sub-task 的 Story Points，按人和總計列出，並分成 Done、In Progress、Not Started，這樣我就能掌握工作量。
+17. 身為使用者，我希望 Done 的點數依完成日按週和按月分組，In Progress 和 Not Started 則顯示為當下的快照，這樣完成的工作會算在它真正完成的時候，未完成的工作也不會被硬塞到一個不可靠的日期上。
+18. 身為使用者，我希望未估點的 Sub-task 數量顯示在每個總數旁邊，並列出其中 In Progress 和 Done 的單號，這樣缺少的估點就不會在沒人察覺的情況下讓任何人的工作量被低估。
+19. 身為使用者，我希望報表預設顯示在終端機，只有在我要求時才輸出 CSV，而且絕不發布到其他地方，這樣內部的工作量資料就能留在內部。
 
 ## 實作決策
 
@@ -82,10 +86,20 @@
 5. 只有一個明顯吻合時直接提議；有好幾個時，列出最多 3 個附理由的候選，再加上「新建」；完全沒有吻合時，建立缺少的層級，新建 Epic 時加上 ⚠。
 6. 缺少 Story Points 時，提醒使用者並提供建議值：1 點 = 1 天；取所選 Task 底下已估點 Sub-task 的中位數，沒有可參考的 Sub-task 時依工作內容以天數估計，四捨五入到小數點後一位。
 
+**Points Report**（唯讀；見 `references/points-report.md`）
+- Team 是專案中所有被指派過 Sub-task 的人，不另外維護成員名單。報表每人一列，接著是「未指派」，最後是不含未指派的 Team 合計。
+- Progress State 取自 status category：`new` 是 Not Started，`indeterminate` 是 In Progress，`done` 是 Done。
+- Done 的 Sub-task 依 `resolutiondate` 分組；沒有 Resolution 時改用 `statuscategorychangedate`，並在註腳中註明張數。在瀏覽器的本地時區下，依週（週一到週日）和日曆月分組。JQL 會先多留一天的緩衝做初步篩選（一般用 `resolutiondate >= …`，替代日期的情況用 `updated >= …`），精確的篩選則在瀏覽器端進行。
+- 週以日期區間作為標籤，一週歸到它週一所在的月份。月合計依實際日期計算，所以可能和該月底下各週的總和不同。
+- 範圍用自然語言指定，預設是上個月加本月。
+- 未估點的 Sub-task 不計入總數，以 `(+N 未估)` 的形式顯示；其中 In Progress 和 Done 的會列出單號。
+- 輸出為終端機中的 markdown 表格。使用者要求時，另外把 CSV 存到 `~/Downloads/jira-points-<FROM>_<TO>.csv`。報表絕不發布到任何地方。
+
 ## 測試決策
 
 - 沒有程式碼，所以沒有單元測試。workflow 的正確性建立在固定的片段和 `SKILL.md` 中的規則上。
 - `references/jira-rest.md` 裡的每個片段都必須能被解析為合法的 JavaScript 函式（修改檔案時做一次語法檢查）。heredoc 加上 `eval` 的執行方式，已經對一個公開的 JSON API 做過端到端驗證，包含中日韓文字、引號和 `$`。
+- 點數片段的日期分組邏輯（時區、週的邊界、Resolution 的替代日期、範圍外的排除、未指派）已經在 Node 中用假的 `fetch` 和 `references/points-report-examples.md` 裡的範例資料驗證過（`TZ=Asia/Taipei`）。報表的格式則依照該檔案中的預期表格手動驗證。
 - Placement 判斷和計畫執行，都依照 `skills/jira-manager/references/placement-examples.md` 手動驗證，包括執行到一半失敗的情況。
 - 第一次對公司的 Jira 實際執行時，應該用一個只會沿用既有 Issue、不會寫入任何東西的 Work Item，先確認 session、欄位 ID 和 Issue 樹都正確，再建立任何 Issue。
 

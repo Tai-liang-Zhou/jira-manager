@@ -164,3 +164,75 @@ async () => {
 | linkRelates | POST | `/rest/api/2/issueLink` | `{ type: { name: 'Relates' }, inwardIssue: { key: from }, outwardIssue: { key: to } }` |
 
 In the body, write out the resolved keys and the real field IDs, e.g. `{ fields: { customfield_10008: 'PROJ-1', … } }`. Refs must already be replaced with the keys created by earlier steps. `setPoints` and `linkRelates` return an empty body on success (status 204/201), so no `key` comes back.
+
+## Points
+
+For a Points Report. `__FROM__` and `__TO__` are local dates (`YYYY-MM-DD`): the range is `[FROM, TO)`. The snippet returns raw per-person sums, and the report is formatted from them (see [points-report.md](points-report.md)).
+
+Dates are bucketed in the browser's local time zone, the same as the user's computer. JQL only pre-filters with a one-day margin, because Jira interprets JQL dates in the user's Jira profile time zone. A Done Sub-task with no resolution date falls back to `statuscategorychangedate`. `updated` is always at or after that date, so `updated >= …` is a safe pre-filter for those issues.
+
+```js
+async () => {
+  const P = '__PROJECT__', POINTS = '__STORY_POINTS__', FROM = '__FROM__', TO = '__TO__';
+  const H = { Accept: 'application/json', 'Content-Type': 'application/json' };
+  const meRes = await fetch('/rest/api/2/myself', { headers: H });
+  if (meRes.status !== 200) return { loggedIn: false, status: meRes.status };
+  const search = async (jql, fields) => {
+    const all = [];
+    for (;;) {
+      const r = await fetch('/rest/api/2/search', { method: 'POST', headers: H, body: JSON.stringify({ jql, fields, startAt: all.length, maxResults: 100 }) });
+      if (!r.ok) throw new Error('search ' + r.status + ': ' + (await r.text()).slice(0, 300));
+      const page = await r.json();
+      all.push(...page.issues);
+      if (page.issues.length === 0 || all.length >= page.total) return all;
+    }
+  };
+  const pad = (n) => String(n).padStart(2, '0');
+  const ymd = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  const localMidnight = (s) => new Date(s + 'T00:00:00');
+  const parseJira = (s) => (s ? new Date(s.replace(/([+-]\d\d)(\d\d)$/, '$1:$2')) : null);
+  const monday = (d) => { const m = new Date(d.getFullYear(), d.getMonth(), d.getDate()); m.setDate(m.getDate() - ((m.getDay() + 6) % 7)); return m; };
+  const from = localMidnight(FROM), to = localMidnight(TO);
+  const margin = new Date(from); margin.setDate(margin.getDate() - 1);
+  const scope = 'project = ' + JSON.stringify(P) + ' AND issuetype = Sub-task';
+  const fields = ['summary', 'assignee', 'status', 'resolutiondate', 'statuscategorychangedate', POINTS];
+  const since = JSON.stringify(ymd(margin));
+  const [doneIssues, openIssues] = await Promise.all([
+    search(scope + ' AND statusCategory = Done AND (resolutiondate >= ' + since + ' OR (resolutiondate is EMPTY AND updated >= ' + since + '))', fields),
+    search(scope + ' AND statusCategory != Done', fields),
+  ]);
+  const people = {};
+  const person = (f) => {
+    const k = f.assignee ? f.assignee.name : '';
+    if (!people[k]) people[k] = { name: k || null, displayName: f.assignee ? f.assignee.displayName : null, weeks: {}, months: {}, inProgress: { points: 0, unestimated: 0 }, notStarted: { points: 0, unestimated: 0 } };
+    return people[k];
+  };
+  const add = (bucket, pts) => { if (pts == null) bucket.unestimated++; else bucket.points = Math.round((bucket.points + pts) * 100) / 100; };
+  const cell = (obj, key) => (obj[key] = obj[key] || { points: 0, unestimated: 0 });
+  const weeks = [];
+  for (let w = monday(from); w < to; w.setDate(w.getDate() + 7)) {
+    const end = new Date(w); end.setDate(end.getDate() + 6);
+    weeks.push({ key: ymd(w), label: (w.getMonth() + 1) + '/' + w.getDate() + '–' + (end.getMonth() + 1) + '/' + end.getDate(), month: ymd(w).slice(0, 7), partial: w < from || end >= to });
+  }
+  const unestimatedKeys = [];
+  let fallbackCount = 0;
+  for (const i of doneIssues) {
+    const f = i.fields;
+    const resolved = parseJira(f.resolutiondate);
+    const at = resolved || parseJira(f.statuscategorychangedate);
+    if (!at || at < from || at >= to) continue;
+    if (!resolved) fallbackCount++;
+    const p = person(f), pts = f[POINTS] ?? null;
+    add(cell(p.weeks, ymd(monday(at))), pts);
+    add(cell(p.months, ymd(at).slice(0, 7)), pts);
+    if (pts == null) unestimatedKeys.push({ key: i.key, summary: f.summary, assignee: p.displayName, state: 'Done' });
+  }
+  for (const i of openIssues) {
+    const f = i.fields, p = person(f), pts = f[POINTS] ?? null;
+    const started = f.status.statusCategory.key === 'indeterminate';
+    add(started ? p.inProgress : p.notStarted, pts);
+    if (pts == null && started) unestimatedKeys.push({ key: i.key, summary: f.summary, assignee: p.displayName, state: 'In Progress' });
+  }
+  return { range: { from: FROM, to: TO }, weeks, people: Object.values(people), fallbackCount, unestimatedKeys };
+}
+```

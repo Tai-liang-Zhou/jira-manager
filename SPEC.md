@@ -37,6 +37,10 @@ A Claude Code Skill (`/jira-manager`) that drives `playwright-cli` directly, wit
 13. As a user, I want to list the Open Epic → Task → Sub-task tree, and optionally include Done issues, so that I can review the project structure.
 14. As a user, I want to log in through a real browser only when my saved session has expired, so that I'm not asked to log in on every run.
 15. As a user, I want `/jira-manager` available from any directory but only started when I invoke it explicitly, so that casual remarks never start a workflow that writes to Jira.
+16. As a user, I want the Team's Story Points on Sub-tasks reported per person and in total, split into Done, In Progress and Not Started, so that I can see the workload.
+17. As a user, I want Done points grouped by week and by month of their resolution date, and In Progress / Not Started shown as a current snapshot, so that finished work is measured when it finished and unfinished work isn't forced onto an unreliable date.
+18. As a user, I want unestimated Sub-tasks counted next to each total and the In Progress / Done ones listed by key, so that missing estimates don't silently understate anyone's work.
+19. As a user, I want the report in the terminal by default and as a CSV only when I ask, and never published elsewhere, so that internal workload data stays internal.
 
 ## Implementation Decisions
 
@@ -82,10 +86,20 @@ A Claude Code Skill (`/jira-manager`) that drives `playwright-cli` directly, wit
 5. One clear match → propose it. Several → at most 3 candidates with reasons plus "create new". None → create the missing levels, with ⚠ on a new Epic.
 6. Missing Story Points → remind the user and suggest a value: 1 point = 1 day; the median of the chosen Task's estimated Sub-tasks, or an estimate in days when it has none, rounded to one decimal place.
 
+**Points Report** (read-only; see `references/points-report.md`)
+- Team = every assignee of a Sub-task in the project, with no member list. Rows are one per person, then 「未指派」, then a Team total that excludes unassigned.
+- Progress State comes from the status category: `new` = Not Started, `indeterminate` = In Progress, `done` = Done.
+- Done Sub-tasks are bucketed by `resolutiondate`, or by `statuscategorychangedate` when there is no resolution (counted in a footnote). They are grouped into weeks (Monday–Sunday) and calendar months in the browser's local time zone. JQL pre-filters with a one-day margin (`resolutiondate >= …`, or `updated >= …` for the fallback), and exact filtering happens client-side.
+- Weeks are labelled by date range, and a week belongs to the month of its Monday. Month totals use actual dates and may differ from the sum of their weeks.
+- The range comes from natural language. The default is last month plus this month.
+- Unestimated Sub-tasks add nothing to totals, are shown as `(+N 未估)`, and are listed by key when In Progress or Done.
+- Output is markdown tables in the terminal. On request, a CSV goes to `~/Downloads/jira-points-<FROM>_<TO>.csv`. The report is never published anywhere.
+
 ## Testing Decisions
 
 - There is no code, so there are no unit tests. The workflow's correctness rests on the fixed snippets and the rules in `SKILL.md`.
 - Every snippet in `references/jira-rest.md` must parse as a JavaScript function (checked by a syntax pass when the file is edited). The heredoc + `eval` path has been checked end to end against a public JSON API, including CJK text, quotes and `$`.
+- The points snippet's date bucketing (time zones, week boundaries, the resolution fallback, range exclusion, unassigned) was checked by running it in Node against a fake `fetch` with the fixture in `references/points-report-examples.md` (`TZ=Asia/Taipei`). Report formatting is verified manually against the expected tables there.
 - Placement judgement and plan execution are verified manually against `skills/jira-manager/references/placement-examples.md`, including the partial-failure case.
 - The first real run against the company Jira should use a Work Item that only reuses existing issues (no writes), to confirm the session, field IDs and tree before any issue is created.
 

@@ -1,13 +1,13 @@
 ---
 name: jira-manager
-description: Manage work in a Jira Server/Data Center project's Epic → Task → Sub-task hierarchy — currently Placement (put today's work under the right Epic/Task as a Sub-task, creating missing levels and setting Story Points). Drives Jira through playwright-cli with a browser login session.
-argument-hint: "<Work Item>[, <Work Item>…]  e.g. 我今天要處理 v2.3 的 QA 任務，0.5 點"
+description: Manage work in a Jira Server/Data Center project's Epic → Task → Sub-task hierarchy — Placement (put today's work under the right Epic/Task as a Sub-task, creating missing levels and setting Story Points) and Points Report (Team Story Point totals by week/month and Progress State). Drives Jira through playwright-cli with a browser login session.
+argument-hint: "<Work Item>…  e.g. 我今天要處理 v2.3 的 QA 任務，0.5 點 | 點數報表 [9 月 | 最近 4 週] [存成 CSV]"
 disable-model-invocation: true
 ---
 
 # /jira-manager
 
-The single entry point for working with Jira. Vocabulary (Work Item, Placement, Placement Plan, Own Issue, Related Task, Referenced Issue, Open, Story Points) is defined in the repo's `CONTEXT.md`. Talk to the user in their language.
+The single entry point for working with Jira. Vocabulary (Work Item, Placement, Placement Plan, Own Issue, Related Task, Referenced Issue, Open, Story Points, Progress State, Points Report, Period, Team, Unestimated Sub-task) is defined in the repo's `CONTEXT.md`. Talk to the user in their language.
 
 All Jira access goes through `playwright-cli` session `jira`. The JavaScript for every call is in [references/jira-rest.md](references/jira-rest.md). Use those snippets verbatim and only fill in the `__PLACEHOLDERS__`.
 
@@ -18,8 +18,9 @@ Pick the capability from `$ARGUMENTS`, do **Setup** first, then follow that capa
 | The user… | Capability | Follow |
 |---|---|---|
 | describes work they're about to do (e.g. 「我今天要處理…」, optionally with points or issue keys) | **Placement** | [references/placement.md](references/placement.md) |
+| asks about Story Point totals, workload or estimates across the Team (e.g. 「點數報表」「9 月點數」「最近 4 週大家做了多少」) | **Points Report** | [references/points-report.md](references/points-report.md) |
 
-If `$ARGUMENTS` is empty, ask what they want to do. If it asks for something not in the table (e.g. analysing Story Point totals), say that capability doesn't exist yet. Don't improvise Jira calls for it.
+If `$ARGUMENTS` is empty, ask what they want to do. If it asks for something not in the table, say that capability doesn't exist yet. Don't improvise Jira calls for it.
 
 ## Setup and session
 

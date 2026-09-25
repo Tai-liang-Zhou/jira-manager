@@ -1,9 +1,14 @@
 # /jira-manager
 
-A Claude Code Skill for working with a Jira Server/Data Center project's **Epic → Task → Sub-task** hierarchy. Its first capability, **Placement**, puts the work you're about to do in the right place. It reuses suitable issues, creates the missing levels, and sets Story Points. It shows you a Placement Plan first and writes nothing until you confirm.
+A Claude Code Skill for working with a Jira Server/Data Center project's **Epic → Task → Sub-task** hierarchy. It has two capabilities:
+
+- **Placement** puts the work you're about to do in the right place. It reuses suitable issues, creates the missing levels, and sets Story Points. It shows you a Placement Plan first and writes nothing until you confirm.
+- **Points Report** (read-only) shows the Team's Story Points per person, split into Done (by week and month of completion), In Progress and Not Started, and flags unestimated Sub-tasks.
 
 ```
 /jira-manager 我今天要處理 v2.3 的 QA 任務，0.5 點
+/jira-manager 9 月點數報表
+/jira-manager 最近 4 週點數，存成 CSV
 ```
 
 It needs no Personal Access Token or API token: you log in to Jira in a real browser, and the Skill drives [`playwright-cli`](https://github.com/microsoft/playwright-cli) to call Jira's REST API with that browser session. There is no code of our own to build or run.
@@ -35,4 +40,4 @@ It needs no Personal Access Token or API token: you log in to Jira in a real bro
 
 ## Verifying
 
-`skills/jira-manager/references/placement-examples.md` lists sample Work Items with their expected Placement Plans. For the first run against a real project, use a Work Item that only reuses existing issues, so you can check the session, field IDs and tree before anything is created.
+`skills/jira-manager/references/placement-examples.md` and `points-report-examples.md` hold sample inputs with their expected Placement Plans and reports. For the first run against a real project, use a Work Item that only reuses existing issues, so you can check the session, field IDs and tree before anything is created.

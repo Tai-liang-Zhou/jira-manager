@@ -46,6 +46,26 @@ _Avoid_: other's task, reference task
 An Issue whose status category is not Done. Only Open Issues are candidates for Placement.
 _Avoid_: active, unresolved
 
+**Progress State**:
+Which of three buckets an Issue is in, taken from Jira's status category: **Not Started** (To Do), **In Progress**, or **Done**. Point totals are always reported per Progress State, never mixed.
+_Avoid_: status (the workflow status name varies per project; the category does not)
+
+**Points Report**:
+A summary of Story Points on Sub-tasks, split by Progress State. Done points are grouped by Period; In Progress and Not Started points are a snapshot of the moment the report is made and have no Period. It has one row per Team member plus a Team total; points on unassigned Sub-tasks are shown on their own row and excluded from the Team total.
+_Avoid_: velocity, burndown
+
+**Unestimated Sub-task**:
+A Sub-task with no Story Points. It adds nothing to point totals, but a Points Report shows how many there are next to each total, and lists the In Progress and Done ones by key so they can be estimated.
+_Avoid_: zero-point task (0 is a real estimate)
+
+**Team**:
+Everyone who is the assignee of at least one Sub-task in the project. There is no separately maintained member list.
+_Avoid_: group, squad
+
+**Period**:
+A calendar week (Monday–Sunday) or calendar month, in the user's local time zone. A Done Sub-task belongs to the Period containing its resolution date. A week that spans two months belongs to the month of its Monday.
+_Avoid_: sprint (a Jira concept this project does not use for reporting)
+
 **Story Points**:
 A numeric effort estimate in days (1 point = 1 day of work, typically fractions such as 0.3, 0.5, 0.7, 1.0), recorded only on Sub-tasks.
 _Avoid_: estimate, points on Tasks/Epics
