@@ -10,7 +10,7 @@ EOF
 playwright-cli -s=jira --raw eval "$JS"
 ```
 
-Placeholders come from `~/.config/jira-placement/config.json`: `__PROJECT__` = `projectKey`, `__EPIC_LINK__` / `__EPIC_NAME__` / `__STORY_POINTS__` = `fields.*`.
+Placeholders come from `~/.config/jira-manager/config.json`: `__PROJECT__` = `projectKey`, `__EPIC_LINK__` / `__EPIC_NAME__` / `__STORY_POINTS__` = `fields.*`.
 
 Every snippet returns JSON. `loggedIn: false` means the session expired: Jira answered 401, or it redirected to the SSO/login page and returned HTML instead of JSON.
 

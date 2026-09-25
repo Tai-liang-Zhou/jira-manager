@@ -12,11 +12,11 @@ An earlier Go MCP server automated the Jira calls, but it authenticated with a P
 
 ## Solution
 
-A Claude Code Skill (`/jira-place`) that drives `playwright-cli` directly, with no script of our own (ADR 0003).
+A Claude Code Skill (`/jira-manager`) that drives `playwright-cli` directly, with no script of our own (ADR 0003).
 
 - The Skill opens a named `playwright-cli` session (`jira`) on a persistent browser profile. The user logs in once in a headed window (handling SSO/MFA themselves), and the profile keeps the login for later runs (ADR 0001).
 - All Jira reads and writes are REST API v2 calls made with `fetch` inside `playwright-cli eval`. They run same-origin in the logged-in page and carry its session cookies. The JavaScript for each call is a fixed reference snippet in the Skill directory.
-- The user invokes `/jira-place` with one or more Work Items, e.g. `/jira-place 我今天要處理 v2.3 的 QA 任務，2 點`.
+- The user invokes `/jira-manager` with one or more Work Items, e.g. `/jira-manager 我今天要處理 v2.3 的 QA 任務，0.5 點`.
 - Claude reads the Open issue tree, performs Placement for each Work Item, and presents one combined **Placement Plan**. The plan says which Epic, Task and Sub-task to reuse or create and gives Story Points, suggested by Claude if the user gave none.
 - After the user confirms, Claude executes the plan's steps in order and reports the result of each.
 
@@ -36,7 +36,7 @@ A Claude Code Skill (`/jira-place`) that drives `playwright-cli` directly, with 
 12. As a user, if applying a plan fails partway through, I want to be told exactly which issues were created (with keys) and which weren't, and nothing rolled back, so that re-running the workflow reuses what already exists.
 13. As a user, I want to list the Open Epic → Task → Sub-task tree, and optionally include Done issues, so that I can review the project structure.
 14. As a user, I want to log in through a real browser only when my saved session has expired, so that I'm not asked to log in on every run.
-15. As a user, I want `/jira-place` available from any directory but only started when I invoke it explicitly, so that casual remarks never start a workflow that writes to Jira.
+15. As a user, I want `/jira-manager` available from any directory but only started when I invoke it explicitly, so that casual remarks never start a workflow that writes to Jira.
 
 ## Implementation Decisions
 
@@ -45,19 +45,20 @@ A Claude Code Skill (`/jira-place`) that drives `playwright-cli` directly, with 
 - The Go MCP server is removed; it remains in git history. There is no script or package in this repo.
 
 **Skill layout**
-- `skills/jira-place/SKILL.md`: the workflow and Placement rules. It sets `disable-model-invocation: true`, so only `/jira-place` starts it.
-- `skills/jira-place/references/jira-rest.md`: fixed JavaScript snippets for the session check, field resolution, tree, issue position and writes. Claude only fills in placeholders, and runs each snippet through a quoted heredoc so the shell never alters it.
-- `skills/jira-place/examples.md`: a fixture tree with Work Items and their expected Placement Plans.
-- It is installed by symlinking `skills/jira-place` to `~/.claude/skills/jira-place`.
+- `skills/jira-manager/SKILL.md`: the entry point. It picks a capability from the arguments (currently only Placement) and does the shared setup and session handling. It sets `disable-model-invocation: true`, so only `/jira-manager` starts it. Future capabilities (e.g. Story Point analysis) are added as rows in its capability table plus their own reference file.
+- `skills/jira-manager/references/placement.md`: the Placement workflow, rules, Placement Plan and apply procedure.
+- `skills/jira-manager/references/jira-rest.md`: fixed JavaScript snippets for the session check, field resolution, tree, issue position and writes. Claude only fills in placeholders, and runs each snippet through a quoted heredoc so the shell never alters it.
+- `skills/jira-manager/references/placement-examples.md`: a fixture tree with Work Items and their expected Placement Plans.
+- It is installed by symlinking `skills/jira-manager` to `~/.claude/skills/jira-manager`.
 
 **Jira target & authentication**
 - Jira Server/Data Center, REST API v2, single project.
-- Session: `playwright-cli -s=jira open <baseUrl> --browser=chrome --profile=~/.config/jira-placement/profile`, falling back to bundled Chromium if Chrome is missing. If the session check fails, the Skill reopens with `--headed` and waits for the user to log in. Claude never types credentials.
+- Session: `playwright-cli -s=jira open <baseUrl> --browser=chrome --profile=~/.config/jira-manager/profile`, falling back to bundled Chromium if Chrome is missing. If the session check fails, the Skill reopens with `--headed` and waits for the user to log in. Claude never types credentials.
 - An expired session shows up as a 401, or as HTML (an SSO/login page) where JSON was expected.
 - Writes send `X-Atlassian-Token: no-check`, which is required for cookie-authenticated writes.
 
 **Configuration**
-- `~/.config/jira-placement/config.json` holds `baseUrl`, `projectKey` and `fields` (the `epicLink`, `epicName` and `storyPoints` custom field IDs). On first run, the Skill asks for the base URL and project key.
+- `~/.config/jira-manager/config.json` holds `baseUrl`, `projectKey` and `fields` (the `epicLink`, `epicName` and `storyPoints` custom field IDs). On first run, the Skill asks for the base URL and project key.
 - Field IDs are resolved from `GET /rest/api/2/field` by display name ("Epic Link", "Epic Name", "Story Points") and cached in the config. The user can edit them there if detection fails.
 - Issue type names are the standard English `"Epic"`, `"Task"`, `"Sub-task"`.
 
@@ -85,7 +86,7 @@ A Claude Code Skill (`/jira-place`) that drives `playwright-cli` directly, with 
 
 - There is no code, so there are no unit tests. The workflow's correctness rests on the fixed snippets and the rules in `SKILL.md`.
 - Every snippet in `references/jira-rest.md` must parse as a JavaScript function (checked by a syntax pass when the file is edited). The heredoc + `eval` path has been checked end to end against a public JSON API, including CJK text, quotes and `$`.
-- Placement judgement and plan execution are verified manually against `skills/jira-place/examples.md`, including the partial-failure case.
+- Placement judgement and plan execution are verified manually against `skills/jira-manager/references/placement-examples.md`, including the partial-failure case.
 - The first real run against the company Jira should use a Work Item that only reuses existing issues (no writes), to confirm the session, field IDs and tree before any issue is created.
 
 ## Out of Scope
@@ -103,6 +104,6 @@ A Claude Code Skill (`/jira-place`) that drives `playwright-cli` directly, with 
 
 ## Further Notes
 
-- The profile directory `~/.config/jira-placement/profile` is equivalent to a login credential and must never be committed, copied or shared.
+- The profile directory `~/.config/jira-manager/profile` is equivalent to a login credential and must never be committed, copied or shared.
 - Session lifetime is controlled by the company's Jira/SSO configuration. When it expires, the Skill reopens the browser headed for the user to log in again.
 - The plan-safety rules (validate first, in order, stop on failure) are instructions, not code. If Claude is ever seen deviating from them, that is the signal to revisit ADR 0003 and bring back a script for `apply`.

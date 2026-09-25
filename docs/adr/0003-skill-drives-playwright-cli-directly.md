@@ -10,6 +10,6 @@ Supersedes ADR 0002. We still replace the Go MCP server with a Claude Code Skill
 
 ## Consequences
 
-- The safety rules `apply` enforced in code are now instructions in `SKILL.md`: validate the whole Placement Plan before any write, run steps in order, substitute created keys for refs, stop at the first failure and report done/failed/skipped. They can only be checked by manual verification against `examples.md`.
+- The safety rules `apply` enforced in code are now instructions in the Skill (`references/placement.md`): validate the whole Placement Plan before any write, run steps in order, substitute created keys for refs, stop at the first failure and report done/failed/skipped. They can only be checked by manual verification against `references/placement-examples.md`.
 - The JavaScript for recurring calls (resolving fields, building the tree) lives as reference snippets inside the Skill directory, so Claude does not improvise it on each run.
-- The persistent browser profile under `~/.config/jira-placement/profile` is the login credential.
+- The persistent browser profile under `~/.config/jira-manager/profile` is the login credential.

@@ -12,11 +12,11 @@
 
 ## 解決方案
 
-一個直接操作 `playwright-cli` 的 Claude Code Skill（`/jira-place`），不需要我們自己維護任何腳本（ADR 0003）。
+一個直接操作 `playwright-cli` 的 Claude Code Skill（`/jira-manager`），不需要我們自己維護任何腳本（ADR 0003）。
 
 - Skill 會在一個持久化的瀏覽器 profile 上，開啟名為 `jira` 的 `playwright-cli` session。使用者在有頭的視窗中登入一次（SSO/MFA 由使用者自己完成），之後的執行都會沿用這個 profile 裡的登入狀態（ADR 0001）。
 - 所有對 Jira 的讀寫，都是在 `playwright-cli eval` 裡用 `fetch` 呼叫 REST API v2。這些請求在已登入的頁面中以同源方式執行，會自動帶上 session cookie。每一種呼叫的 JavaScript 都是 Skill 目錄裡固定的參考片段。
-- 使用者用一或多個 Work Item 呼叫 `/jira-place`，例如 `/jira-place 我今天要處理 v2.3 的 QA 任務，2 點`。
+- 使用者用一或多個 Work Item 呼叫 `/jira-manager`，例如 `/jira-manager 我今天要處理 v2.3 的 QA 任務，0.5 點`。
 - Claude 讀取 Open 的 Issue 樹，對每個 Work Item 做 Placement，並產出一份合併的 **Placement Plan**。計畫中會說明要沿用或新建哪個 Epic、Task、Sub-task，以及 Story Points（使用者沒給時由 Claude 提供建議值）。
 - 使用者確認之後，Claude 依序執行計畫中的步驟，並回報每一步的結果。
 
@@ -36,7 +36,7 @@
 12. 身為使用者，如果計畫執行到一半失敗，我希望清楚知道哪些 Issue 已經建立（附單號）、哪些還沒有，而且不做任何回滾，這樣重新執行 workflow 時就會沿用已經建好的單子。
 13. 身為使用者，我希望能列出 Open 的 Epic → Task → Sub-task 樹，也可以選擇把 Done 的 Issue 一起列出，方便我檢視專案結構。
 14. 身為使用者，我希望只有在保存的 session 過期時，才需要透過真的瀏覽器重新登入，而不是每次執行都要登入。
-15. 身為使用者，我希望 `/jira-place` 在任何目錄都能使用，但只有在我明確呼叫時才會啟動，這樣隨口一句話不會意外啟動一個會寫入 Jira 的 workflow。
+15. 身為使用者，我希望 `/jira-manager` 在任何目錄都能使用，但只有在我明確呼叫時才會啟動，這樣隨口一句話不會意外啟動一個會寫入 Jira 的 workflow。
 
 ## 實作決策
 
@@ -45,19 +45,20 @@
 - 刪除 Go MCP server，保留在 git 歷史中。這個 repo 裡沒有任何腳本或套件。
 
 **Skill 結構**
-- `skills/jira-place/SKILL.md`：workflow 流程與 Placement 規則。設定 `disable-model-invocation: true`，所以只有 `/jira-place` 能啟動它。
-- `skills/jira-place/references/jira-rest.md`：固定的 JavaScript 片段，包括 session 檢查、欄位解析、Issue 樹、Issue 位置查詢和寫入。Claude 只負責填入佔位符，並透過加了引號的 heredoc 執行，確保 shell 不會改動片段內容。
-- `skills/jira-place/examples.md`：一棵範例 Issue 樹，搭配多個 Work Item 及對應的預期 Placement Plan。
-- 安裝方式是把 `skills/jira-place` symlink 到 `~/.claude/skills/jira-place`。
+- `skills/jira-manager/SKILL.md`：入口。依參數選擇要執行的功能（目前只有 Placement），並處理共用的設定與 session。設定 `disable-model-invocation: true`，所以只有 `/jira-manager` 能啟動它。之後新增的功能（例如 Story Points 分析），只需要在功能表加一列，再加上它自己的 reference 檔案。
+- `skills/jira-manager/references/placement.md`：Placement 的流程、規則、Placement Plan 和執行步驟。
+- `skills/jira-manager/references/jira-rest.md`：固定的 JavaScript 片段，包括 session 檢查、欄位解析、Issue 樹、Issue 位置查詢和寫入。Claude 只負責填入佔位符，並透過加了引號的 heredoc 執行，確保 shell 不會改動片段內容。
+- `skills/jira-manager/references/placement-examples.md`：一棵範例 Issue 樹，搭配多個 Work Item 及對應的預期 Placement Plan。
+- 安裝方式是把 `skills/jira-manager` symlink 到 `~/.claude/skills/jira-manager`。
 
 **Jira 目標與認證**
 - Jira Server/Data Center、REST API v2、單一專案。
-- Session 的開啟方式是 `playwright-cli -s=jira open <baseUrl> --browser=chrome --profile=~/.config/jira-placement/profile`；如果沒有安裝 Chrome，就改用內建的 Chromium。session 檢查失敗時，Skill 會加上 `--headed` 重新開啟，等使用者登入。Claude 絕不代為輸入帳密。
+- Session 的開啟方式是 `playwright-cli -s=jira open <baseUrl> --browser=chrome --profile=~/.config/jira-manager/profile`；如果沒有安裝 Chrome，就改用內建的 Chromium。session 檢查失敗時，Skill 會加上 `--headed` 重新開啟，等使用者登入。Claude 絕不代為輸入帳密。
 - session 過期的判斷方式：收到 401，或是在預期 JSON 的地方收到 HTML（SSO 或登入頁）。
 - 寫入請求會帶上 `X-Atlassian-Token: no-check`，這是用 cookie 認證寫入時的必要設定。
 
 **設定**
-- `~/.config/jira-placement/config.json` 存放 `baseUrl`、`projectKey` 和 `fields`（`epicLink`、`epicName`、`storyPoints` 三個 custom field 的 ID）。第一次執行時，Skill 會詢問 base URL 和專案 key。
+- `~/.config/jira-manager/config.json` 存放 `baseUrl`、`projectKey` 和 `fields`（`epicLink`、`epicName`、`storyPoints` 三個 custom field 的 ID）。第一次執行時，Skill 會詢問 base URL 和專案 key。
 - 欄位 ID 透過 `GET /rest/api/2/field` 依顯示名稱（「Epic Link」、「Epic Name」、「Story Points」）解析，並快取在設定檔中。如果自動偵測失敗，使用者可以直接在設定檔裡修改。
 - Issue type 名稱固定使用標準英文：`"Epic"`、`"Task"`、`"Sub-task"`。
 
@@ -85,7 +86,7 @@
 
 - 沒有程式碼，所以沒有單元測試。workflow 的正確性建立在固定的片段和 `SKILL.md` 中的規則上。
 - `references/jira-rest.md` 裡的每個片段都必須能被解析為合法的 JavaScript 函式（修改檔案時做一次語法檢查）。heredoc 加上 `eval` 的執行方式，已經對一個公開的 JSON API 做過端到端驗證，包含中日韓文字、引號和 `$`。
-- Placement 判斷和計畫執行，都依照 `skills/jira-place/examples.md` 手動驗證，包括執行到一半失敗的情況。
+- Placement 判斷和計畫執行，都依照 `skills/jira-manager/references/placement-examples.md` 手動驗證，包括執行到一半失敗的情況。
 - 第一次對公司的 Jira 實際執行時，應該用一個只會沿用既有 Issue、不會寫入任何東西的 Work Item，先確認 session、欄位 ID 和 Issue 樹都正確，再建立任何 Issue。
 
 ## 不在範圍內
@@ -103,6 +104,6 @@
 
 ## 補充說明
 
-- profile 目錄 `~/.config/jira-placement/profile` 等同於登入憑證，絕對不能 commit、複製或分享出去。
+- profile 目錄 `~/.config/jira-manager/profile` 等同於登入憑證，絕對不能 commit、複製或分享出去。
 - session 的有效期限由公司的 Jira/SSO 設定決定。過期時，Skill 會以有頭模式重新開啟瀏覽器，讓使用者再登入一次。
 - 計畫的安全規則（先驗證、依序執行、失敗就停）是寫給 Claude 的指示，不是程式碼。如果發現 Claude 沒有遵守這些規則，就是該重新檢討 ADR 0003、把 `apply` 改回腳本的訊號。

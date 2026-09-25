@@ -1,6 +1,6 @@
 # Placement examples
 
-Use these for manual verification: run the tree snippet against a project in this shape (or reason over it), give `/jira-place` each Work Item, and compare the Placement Plan with the expected one. Nothing here is executed automatically.
+Use these for manual verification: run the tree snippet against a project in this shape (or reason over it), give `/jira-manager` each Work Item, and compare the Placement Plan with the expected one. Nothing here is executed automatically.
 
 ## Fixture tree (me = `me`)
 
