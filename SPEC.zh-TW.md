@@ -12,10 +12,10 @@
 
 ## 解決方案
 
-一個直接操作 `playwright-cli` 的 Claude Code Skill（`/jira-manager`），不需要我們自己維護任何腳本（ADR 0003）。
+一個直接操作 `agent-browser` 的 Claude Code Skill（`/jira-manager`），不需要我們自己維護任何腳本（ADR 0003、ADR 0004）。
 
-- Skill 會在一個持久化的瀏覽器 profile 上，開啟名為 `jira` 的 `playwright-cli` session。使用者在有頭的視窗中登入一次（SSO/MFA 由使用者自己完成），之後的執行都會沿用這個 profile 裡的登入狀態（ADR 0001）。
-- 所有對 Jira 的讀寫，都是在 `playwright-cli eval` 裡用 `fetch` 呼叫 REST API v2。這些請求在已登入的頁面中以同源方式執行，會自動帶上 session cookie。每一種呼叫的 JavaScript 都是 Skill 目錄裡固定的參考片段。
+- Skill 會在一個持久化的瀏覽器 profile 上，開啟名為 `jira` 的 `agent-browser` session。使用者在有頭的視窗中登入一次（SSO/MFA 由使用者自己完成），之後的執行都會沿用這個 profile 裡的登入狀態（ADR 0001）。
+- 所有對 Jira 的讀寫，都是在 `agent-browser eval` 裡用 `fetch` 呼叫 REST API v2。這些請求在已登入的頁面中以同源方式執行，會自動帶上 session cookie。每一種呼叫的 JavaScript 都是 Skill 目錄裡固定的參考片段。
 - 使用者用一或多個 Work Item 呼叫 `/jira-manager`，例如 `/jira-manager 我今天要處理 v2.3 的 QA 任務，0.5 點`。
 - Claude 讀取 Open 的 Issue 樹，對每個 Work Item 做 Placement，並產出一份合併的 **Placement Plan**。計畫中會說明要沿用或新建哪個 Epic、Task、Sub-task，以及 Story Points（使用者沒給時由 Claude 提供建議值）。
 - 使用者確認之後，Claude 依序執行計畫中的步驟，並回報每一步的結果。
@@ -45,7 +45,7 @@
 ## 實作決策
 
 **工具**
-- 唯一的執行期依賴是 `playwright-cli`（`@playwright/cli`，由使用者自行全域安裝）。Skill 會先檢查它是否存在；如果沒有安裝，就提供安裝指令並停止。
+- 唯一的執行期依賴是 `agent-browser`（由使用者用 `npm install -g agent-browser && agent-browser install` 自行全域安裝）。Skill 會先檢查它是否存在；如果沒有安裝，就提供安裝指令並停止。
 - 刪除 Go MCP server，保留在 git 歷史中。這個 repo 裡沒有任何腳本或套件。
 
 **Skill 結構**
@@ -57,7 +57,7 @@
 
 **Jira 目標與認證**
 - Jira Server/Data Center、REST API v2、單一專案。
-- Session 的開啟方式是 `playwright-cli -s=jira open <baseUrl> --browser=chrome --profile=~/.config/jira-manager/profile`；如果沒有安裝 Chrome，就改用內建的 Chromium。session 檢查失敗時，Skill 會加上 `--headed` 重新開啟，等使用者登入。Claude 絕不代為輸入帳密。
+- Session 的開啟方式是 `agent-browser --session jira --profile ~/.config/jira-manager/profile --executable-path <Google Chrome> open <baseUrl>`；如果沒有安裝 Google Chrome，就改用 agent-browser 內建的 Chrome for Testing。絕不使用 `--auto-connect` 或真正的 Chrome profile，所以 Claude 只看得到 Jira 的登入狀態。session 檢查失敗時，Skill 會加上 `--headed` 重新開啟，等使用者登入。Claude 絕不代為輸入帳密。
 - session 過期的判斷方式：收到 401，或是在預期 JSON 的地方收到 HTML（SSO 或登入頁）。
 - 寫入請求會帶上 `X-Atlassian-Token: no-check`，這是用 cookie 認證寫入時的必要設定。
 
@@ -98,7 +98,7 @@
 ## 測試決策
 
 - 沒有程式碼，所以沒有單元測試。workflow 的正確性建立在固定的片段和 `SKILL.md` 中的規則上。
-- `references/jira-rest.md` 裡的每個片段都必須能被解析為合法的 JavaScript 函式（修改檔案時做一次語法檢查）。heredoc 加上 `eval` 的執行方式，已經對一個公開的 JSON API 做過端到端驗證，包含中日韓文字、引號和 `$`。
+- `references/jira-rest.md` 裡的每個片段都必須能被解析為立即執行的 async 函式 `(async () => { … })()`（修改檔案時做一次語法檢查）。如果只是單純的函式，`agent-browser eval` 會印出 `{}` 而且不報錯。heredoc 加上 `eval --stdin` 的執行方式，已經對一個公開的 JSON API 做過端到端驗證，包含中日韓文字、引號和 `$`。
 - 點數片段的日期分組邏輯（時區、週的邊界、Resolution 的替代日期、範圍外的排除、未指派）已經在 Node 中用假的 `fetch` 和 `references/points-report-examples.md` 裡的範例資料驗證過（`TZ=Asia/Taipei`）。報表的格式則依照該檔案中的預期表格手動驗證。
 - Placement 判斷和計畫執行，都依照 `skills/jira-manager/references/placement-examples.md` 手動驗證，包括執行到一半失敗的情況。
 - 第一次對公司的 Jira 實際執行時，應該用一個只會沿用既有 Issue、不會寫入任何東西的 Work Item，先確認 session、欄位 ID 和 Issue 樹都正確，再建立任何 Issue。

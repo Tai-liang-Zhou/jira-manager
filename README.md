@@ -7,43 +7,40 @@ A Claude Code Skill for working with a Jira Server/Data Center project's **Epic 
 - **Placement** puts the work you're about to do in the right place. It reuses suitable issues, creates the missing levels, and sets Story Points. It shows you a Placement Plan first and writes nothing until you confirm.
 - **Points Report** (read-only) shows the Team's Story Points per person. Done points are grouped by week and month of completion, In Progress and Not Started are shown separately, and unestimated Sub-tasks are flagged.
 
-It needs no Personal Access Token or API token: you log in to Jira in a real browser, and the Skill drives [`playwright-cli`](https://github.com/microsoft/playwright-cli) to call Jira's REST API with that browser session. There is no code of our own to build or run.
+It needs no Personal Access Token or API token: you log in to Jira in a real browser, and the Skill drives [`agent-browser`](https://github.com/vercel-labs/agent-browser) to call Jira's REST API with that browser session. There is no code of our own to build or run.
 
 - [SPEC.md](SPEC.md) / [SPEC.zh-TW.md](SPEC.zh-TW.md): full specification (English / 繁體中文)
 - [CONTEXT.md](CONTEXT.md): glossary (Work Item, Placement, Placement Plan, Own Issue, Points Report, …)
-- [docs/adr/](docs/adr/): why browser-session auth (0001) and why `playwright-cli` with no script (0003)
+- [docs/adr/](docs/adr/): why browser-session auth (0001), why a browser CLI with no script (0003), and why `agent-browser` (0004)
 
 ## Requirements
 
 | Dependency | Version | Why |
 |---|---|---|
 | [Claude Code](https://claude.com/claude-code) | any recent | Runs the Skill |
-| [Node.js](https://nodejs.org) + npm | ≥ 18 | Installs and runs `playwright-cli` |
-| [`@playwright/cli`](https://www.npmjs.com/package/@playwright/cli) (`playwright-cli`) | latest | Drives the browser and calls Jira's REST API |
-| Google Chrome | optional | Preferred browser for SSO (device trust, client certificates). Without it, Playwright's bundled Chromium is used. |
+| [Node.js](https://nodejs.org) + npm | ≥ 18 | Installs `agent-browser` |
+| [`agent-browser`](https://github.com/vercel-labs/agent-browser) | latest | Drives the browser and calls Jira's REST API |
+| Google Chrome | optional | Preferred browser for SSO (device trust, client certificates). Without it, agent-browser's bundled Chrome for Testing is used. |
 | Jira Server / Data Center | REST API v2 | Must have **Epic Link**, **Epic Name** and **Story Points** custom fields, and the issue types **Epic**, **Task** and **Sub-task** |
 
 You also need a Jira account that can log in through the browser and create issues in the project. No API token is needed.
 
 ## Installation
 
-1. **Install `playwright-cli`** and check that it works:
+1. **Install `agent-browser`** and its bundled browser, then check that it works (skip this if you already use agent-browser):
    ```sh
-   npm install -g @playwright/cli@latest
-   playwright-cli --version
+   npm install -g agent-browser
+   agent-browser install
+   agent-browser --version
    ```
-2. **Install a browser for it** (skip this if Google Chrome is installed):
-   ```sh
-   playwright-cli install-browser chromium
-   ```
-3. **Clone this repo** anywhere and **link the Skill** into your user skills, so `/jira-manager` works from any directory:
+2. **Clone this repo** anywhere and **link the Skill** into your user skills, so `/jira-manager` works from any directory:
    ```sh
    git clone <this repo> ~/jira-manager
    mkdir -p ~/.claude/skills
    ln -s ~/jira-manager/skills/jira-manager ~/.claude/skills/jira-manager
    ```
    Because it's a symlink, a `git pull` in the repo updates the Skill.
-4. **Restart Claude Code** (or start a new session) and check that `/jira-manager` appears when you type `/jira`.
+3. **Restart Claude Code** (or start a new session) and check that `/jira-manager` appears when you type `/jira`.
 
 ### First run
 
@@ -95,7 +92,8 @@ We recommend making the first run a Points Report (`/jira-manager 點數報表`)
 
 - The browser login is kept in a persistent profile, so you normally log in once and later runs reuse it.
 - When the Jira/SSO session expires, the Skill opens the browser again for you to log in, then carries on.
-- The `playwright-cli` session named `jira` stays open between runs. Run `playwright-cli -s=jira close` to close it.
+- The `agent-browser` session named `jira` stays open between runs. Run `agent-browser --session jira close` to close it.
+- The Skill uses its own profile directory and never connects to your everyday Chrome, so Claude only sees your Jira login.
 
 ## Files outside the repo
 
@@ -108,20 +106,20 @@ We recommend making the first run a Points Report (`/jira-manager 點數報表`)
 
 | Symptom | Fix |
 |---|---|
-| `playwright-cli: command not found` | Redo installation step 1. Check that npm's global bin directory is on your `PATH`. |
-| Browser fails to launch | Install Chrome, or run `playwright-cli install-browser chromium`. |
+| `agent-browser: command not found` | Redo installation step 1. Check that npm's global bin directory is on your `PATH`. |
+| Browser fails to launch | Run `agent-browser doctor`. It checks the bundled Chrome and cleans up stale daemons. |
 | Asked to log in on every run | Check that `~/.config/jira-manager/profile/` exists and is writable. |
 | A write fails with `XSRF check failed` | Your Jira rejected the write request. Report it along with the exact error. |
 | Wrong or missing custom field | Fix the ID in `~/.config/jira-manager/config.json` under `fields`. |
-| Stale browser processes | `playwright-cli kill-all` |
+| Stale browser processes | `agent-browser close --all` |
 
 ## Uninstall
 
 ```sh
-playwright-cli -s=jira close
+agent-browser --session jira close
 rm ~/.claude/skills/jira-manager          # removes the symlink only
 rm -rf ~/.config/jira-manager             # config and saved login
-npm uninstall -g @playwright/cli
+npm uninstall -g agent-browser             # skip if you use it elsewhere
 ```
 
 ## Verifying

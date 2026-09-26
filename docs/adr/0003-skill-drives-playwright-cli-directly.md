@@ -1,3 +1,7 @@
+---
+status: tool choice amended by ADR-0004 (agent-browser replaces playwright-cli)
+---
+
 # The Skill drives `playwright-cli` directly, with no script of our own
 
 Supersedes ADR 0002. We still replace the Go MCP server with a Claude Code Skill, but we dropped the TypeScript script. The user wanted the workflow built from an agent browser tool rather than code we maintain. The Skill therefore has Claude drive `playwright-cli` itself: a named session with a persistent profile holds the login, and Jira's REST API v2 is called with `fetch` inside `playwright-cli eval`, so it runs same-origin with the session cookies.

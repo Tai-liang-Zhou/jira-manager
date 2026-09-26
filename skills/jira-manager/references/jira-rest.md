@@ -1,14 +1,14 @@
-# Jira REST snippets for playwright-cli
+# Jira REST snippets for agent-browser
 
-Every snippet runs inside the logged-in Jira page, so `fetch` is same-origin and carries the session cookies. Run each one through a quoted heredoc so the shell never touches the JavaScript:
+Every snippet runs inside the logged-in Jira page, so `fetch` is same-origin and carries the session cookies. Pipe each one through a quoted heredoc so the shell never touches the JavaScript:
 
 ```bash
-JS=$(cat <<'EOF'
+agent-browser --session jira eval --stdin <<'EOF'
 …snippet with placeholders filled in…
 EOF
-)
-playwright-cli -s=jira --raw eval "$JS"
 ```
+
+Each snippet is an immediately invoked `(async () => { … })()`. Keep the trailing `()`: `eval` evaluates an expression, so a bare `async () => { … }` returns the function itself and prints `{}` without any error. The result prints as JSON. A thrown error prints `✗ Evaluation error: …` and exits 1.
 
 Placeholders come from `~/.config/jira-manager/config.json`: `__PROJECT__` = `projectKey`, `__EPIC_LINK__` / `__EPIC_NAME__` / `__STORY_POINTS__` = `fields.*`.
 
@@ -17,7 +17,7 @@ Every snippet returns JSON. `loggedIn: false` means the session expired: Jira an
 ## Session check
 
 ```js
-async () => {
+(async () => {
   const r = await fetch('/rest/api/2/myself', { headers: { Accept: 'application/json' } });
   const t = await r.text();
   try {
@@ -26,19 +26,19 @@ async () => {
   } catch {
     return { loggedIn: false, status: r.status };
   }
-}
+})()
 ```
 
 ## Resolve fields
 
 ```js
-async () => {
+(async () => {
   const r = await fetch('/rest/api/2/field', { headers: { Accept: 'application/json' } });
   if (r.status === 401) return { loggedIn: false };
   const fields = await r.json();
   const find = (name) => (fields.find((f) => f.name === name) || {}).id || null;
   return { epicLink: find('Epic Link'), epicName: find('Epic Name'), storyPoints: find('Story Points') };
-}
+})()
 ```
 
 ## Tree
@@ -46,7 +46,7 @@ async () => {
 Set `INCLUDE_DONE` to `true` only when the user asks to see Done issues.
 
 ```js
-async () => {
+(async () => {
   const P = '__PROJECT__', EPIC_LINK = '__EPIC_LINK__', POINTS = '__STORY_POINTS__', INCLUDE_DONE = false;
   const H = { Accept: 'application/json', 'Content-Type': 'application/json' };
   const meRes = await fetch('/rest/api/2/myself', { headers: H });
@@ -97,7 +97,7 @@ async () => {
     // A Task whose Epic is Done is dropped.
   }
   return { me: { name: me.name, displayName: me.displayName }, epics: [...epics.values()], tasksWithoutEpic };
-}
+})()
 ```
 
 ## Issue position
@@ -105,7 +105,7 @@ async () => {
 For a Referenced Issue. Replace `__KEY__`.
 
 ```js
-async () => {
+(async () => {
   const EPIC_LINK = '__EPIC_LINK__';
   const H = { Accept: 'application/json' };
   const get = async (key) => {
@@ -133,7 +133,7 @@ async () => {
   if (type === 'Epic') out.epic = { key: i.key, summary: f.summary };
   else if (epicKey) out.epic = { key: epicKey, summary: (await get(epicKey)).fields.summary };
   return out;
-}
+})()
 ```
 
 ## Write
@@ -141,7 +141,7 @@ async () => {
 One snippet for every write step. Fill in `__METHOD__`, `__PATH__` and `__BODY__` (a JSON literal) from the table below. `X-Atlassian-Token: no-check` is required: Jira rejects cookie-authenticated writes without it (XSRF check).
 
 ```js
-async () => {
+(async () => {
   const r = await fetch('__PATH__', {
     method: '__METHOD__',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Atlassian-Token': 'no-check' },
@@ -152,7 +152,7 @@ async () => {
   try { body = t ? JSON.parse(t) : null; } catch { return { loggedIn: false, status: r.status }; }
   const error = r.ok ? null : [...((body && body.errorMessages) || []), ...Object.entries((body && body.errors) || {}).map(([k, v]) => k + ': ' + v)].join('; ') || t.slice(0, 300);
   return { status: r.status, key: body && body.key, error };
-}
+})()
 ```
 
 | op | method | path | body |
@@ -172,7 +172,7 @@ For a Points Report. `__FROM__` and `__TO__` are local dates (`YYYY-MM-DD`): the
 Dates are bucketed in the browser's local time zone, the same as the user's computer. JQL only pre-filters with a one-day margin, because Jira interprets JQL dates in the user's Jira profile time zone. A Done Sub-task with no resolution date falls back to `statuscategorychangedate`. `updated` is always at or after that date, so `updated >= …` is a safe pre-filter for those issues.
 
 ```js
-async () => {
+(async () => {
   const P = '__PROJECT__', POINTS = '__STORY_POINTS__', FROM = '__FROM__', TO = '__TO__';
   const H = { Accept: 'application/json', 'Content-Type': 'application/json' };
   const meRes = await fetch('/rest/api/2/myself', { headers: H });
@@ -234,5 +234,5 @@ async () => {
     if (pts == null && started) unestimatedKeys.push({ key: i.key, summary: f.summary, assignee: p.displayName, state: 'In Progress' });
   }
   return { range: { from: FROM, to: TO }, weeks, people: Object.values(people), fallbackCount, unestimatedKeys };
-}
+})()
 ```

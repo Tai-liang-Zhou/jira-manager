@@ -12,10 +12,10 @@ An earlier Go MCP server automated the Jira calls, but it authenticated with a P
 
 ## Solution
 
-A Claude Code Skill (`/jira-manager`) that drives `playwright-cli` directly, with no script of our own (ADR 0003).
+A Claude Code Skill (`/jira-manager`) that drives `agent-browser` directly, with no script of our own (ADR 0003, ADR 0004).
 
-- The Skill opens a named `playwright-cli` session (`jira`) on a persistent browser profile. The user logs in once in a headed window (handling SSO/MFA themselves), and the profile keeps the login for later runs (ADR 0001).
-- All Jira reads and writes are REST API v2 calls made with `fetch` inside `playwright-cli eval`. They run same-origin in the logged-in page and carry its session cookies. The JavaScript for each call is a fixed reference snippet in the Skill directory.
+- The Skill opens a named `agent-browser` session (`jira`) on a persistent browser profile. The user logs in once in a headed window (handling SSO/MFA themselves), and the profile keeps the login for later runs (ADR 0001).
+- All Jira reads and writes are REST API v2 calls made with `fetch` inside `agent-browser eval`. They run same-origin in the logged-in page and carry its session cookies. The JavaScript for each call is a fixed reference snippet in the Skill directory.
 - The user invokes `/jira-manager` with one or more Work Items, e.g. `/jira-manager 我今天要處理 v2.3 的 QA 任務，0.5 點`.
 - Claude reads the Open issue tree, performs Placement for each Work Item, and presents one combined **Placement Plan**. The plan says which Epic, Task and Sub-task to reuse or create and gives Story Points, suggested by Claude if the user gave none.
 - After the user confirms, Claude executes the plan's steps in order and reports the result of each.
@@ -45,7 +45,7 @@ A Claude Code Skill (`/jira-manager`) that drives `playwright-cli` directly, wit
 ## Implementation Decisions
 
 **Tooling**
-- `playwright-cli` (`@playwright/cli`, installed globally by the user) is the only runtime dependency. The Skill checks for it and stops with install instructions if it's missing.
+- `agent-browser` (installed globally by the user with `npm install -g agent-browser && agent-browser install`) is the only runtime dependency. The Skill checks for it and stops with install instructions if it's missing.
 - The Go MCP server is removed; it remains in git history. There is no script or package in this repo.
 
 **Skill layout**
@@ -57,7 +57,7 @@ A Claude Code Skill (`/jira-manager`) that drives `playwright-cli` directly, wit
 
 **Jira target & authentication**
 - Jira Server/Data Center, REST API v2, single project.
-- Session: `playwright-cli -s=jira open <baseUrl> --browser=chrome --profile=~/.config/jira-manager/profile`, falling back to bundled Chromium if Chrome is missing. If the session check fails, the Skill reopens with `--headed` and waits for the user to log in. Claude never types credentials.
+- Session: `agent-browser --session jira --profile ~/.config/jira-manager/profile --executable-path <Google Chrome> open <baseUrl>`, falling back to the bundled Chrome for Testing if Google Chrome is missing. `--auto-connect` and real Chrome profiles are never used, so Claude only sees the Jira login. If the session check fails, the Skill reopens with `--headed` and waits for the user to log in. Claude never types credentials.
 - An expired session shows up as a 401, or as HTML (an SSO/login page) where JSON was expected.
 - Writes send `X-Atlassian-Token: no-check`, which is required for cookie-authenticated writes.
 
@@ -98,7 +98,7 @@ A Claude Code Skill (`/jira-manager`) that drives `playwright-cli` directly, wit
 ## Testing Decisions
 
 - There is no code, so there are no unit tests. The workflow's correctness rests on the fixed snippets and the rules in `SKILL.md`.
-- Every snippet in `references/jira-rest.md` must parse as a JavaScript function (checked by a syntax pass when the file is edited). The heredoc + `eval` path has been checked end to end against a public JSON API, including CJK text, quotes and `$`.
+- Every snippet in `references/jira-rest.md` must parse as an immediately invoked async function, `(async () => { … })()` (checked by a syntax pass when the file is edited). A bare function would make `agent-browser eval` print `{}` with no error. The heredoc + `eval --stdin` path has been checked end to end against a public JSON API, including CJK text, quotes and `$`.
 - The points snippet's date bucketing (time zones, week boundaries, the resolution fallback, range exclusion, unassigned) was checked by running it in Node against a fake `fetch` with the fixture in `references/points-report-examples.md` (`TZ=Asia/Taipei`). Report formatting is verified manually against the expected tables there.
 - Placement judgement and plan execution are verified manually against `skills/jira-manager/references/placement-examples.md`, including the partial-failure case.
 - The first real run against the company Jira should use a Work Item that only reuses existing issues (no writes), to confirm the session, field IDs and tree before any issue is created.
