@@ -12,6 +12,19 @@ Each snippet is an immediately invoked `(async () => { … })()`. Keep the trail
 
 Placeholders come from `~/.config/jira-manager/config.json`: `__PROJECT__` = `projectKey`, `__EPIC_LINK__` / `__EPIC_NAME__` / `__STORY_POINTS__` = `fields.*`.
 
+Placeholder values end up inside JavaScript, so check each one before filling it in. If a value fails its check, stop and tell the user. Don't try to fix it.
+
+| Placeholder | Must match |
+|---|---|
+| `__PROJECT__` | `^[A-Z][A-Z0-9_]+$` |
+| `__KEY__`, and the key in `__PATH__` | `^[A-Z][A-Z0-9_]+-[0-9]+$` |
+| `__EPIC_LINK__`, `__EPIC_NAME__`, `__STORY_POINTS__` | `^customfield_[0-9]+$` |
+| `__FROM__`, `__TO__` | `^[0-9]{4}-[0-9]{2}-[0-9]{2}$` |
+| `__METHOD__` / `__PATH__` | exactly a row of the **write** table below |
+| `__BODY__` | strict JSON: double-quoted keys and strings, every `"`, `\` and newline in a string escaped. No `'` or backtick strings, no `${…}`, no expressions |
+
+Text such as a summary or Epic Name only ever goes in a JSON string inside `__BODY__`. Never put it anywhere else in a snippet.
+
 Every snippet returns JSON. `loggedIn: false` means the session expired: Jira answered 401, or it redirected to the SSO/login page and returned HTML instead of JSON.
 
 ## Session check
@@ -163,7 +176,7 @@ One snippet for every write step. Fill in `__METHOD__`, `__PATH__` and `__BODY__
 | setPoints | PUT | `/rest/api/2/issue/<KEY>` | `{ fields: { [STORY_POINTS]: points } }` |
 | linkRelates | POST | `/rest/api/2/issueLink` | `{ type: { name: 'Relates' }, inwardIssue: { key: from }, outwardIssue: { key: to } }` |
 
-In the body, write out the resolved keys and the real field IDs, e.g. `{ fields: { customfield_10008: 'PROJ-1', … } }`. Refs must already be replaced with the keys created by earlier steps. `setPoints` and `linkRelates` return an empty body on success (status 204/201), so no `key` comes back.
+The body column shows the shape only. In the real body, write out the resolved keys and the real field IDs as strict JSON, e.g. `{"fields": {"customfield_10008": "PROJ-1", "summary": "v2.3 QA 驗證（我）"}}`. Refs must already be replaced with the keys created by earlier steps. `setPoints` and `linkRelates` return an empty body on success (status 204/201), so no `key` comes back.
 
 ## Points
 

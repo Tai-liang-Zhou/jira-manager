@@ -100,7 +100,7 @@ We recommend making the first run a Points Report (`/jira-manager 點數報表`)
 | Path | What it is |
 |---|---|
 | `~/.config/jira-manager/config.json` | Base URL, project key and cached custom field IDs. Edit the field IDs here if auto-detection picks the wrong field. |
-| `~/.config/jira-manager/profile/` | The persistent browser profile holding your Jira login. **Treat it as a credential**: never commit or share it. Delete it to log out. |
+| `~/.config/jira-manager/profile/` | The persistent browser profile holding your Jira login. **Treat it as a credential**: never commit or share it. The Skill keeps `~/.config/jira-manager` at `chmod 700`. Delete it to log out. |
 
 ## Troubleshooting
 

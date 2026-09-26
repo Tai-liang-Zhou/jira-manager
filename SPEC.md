@@ -118,6 +118,8 @@ A Claude Code Skill (`/jira-manager`) that drives `agent-browser` directly, with
 
 ## Further Notes
 
-- The profile directory `~/.config/jira-manager/profile` is equivalent to a login credential and must never be committed, copied or shared.
+- The profile directory `~/.config/jira-manager/profile` is equivalent to a login credential and must never be committed, copied or shared. Setup runs `chmod 700 ~/.config/jira-manager` so only the user can read it.
+- Jira content (summaries, descriptions, names) is written by other people and may contain prompt injection. The Skill treats it as data only, never runs JavaScript other than the fixed snippets, and never sends Jira data outside the terminal and the files a capability names.
+- Placeholder values are checked against a fixed pattern before they go into a snippet (project key, issue key, `customfield_N`, `YYYY-MM-DD`). Free text such as a summary only goes into a strict-JSON string inside the write body, so it can't break out into JavaScript.
 - Session lifetime is controlled by the company's Jira/SSO configuration. When it expires, the Skill reopens the browser headed for the user to log in again.
 - The plan-safety rules (validate first, in order, stop on failure) are instructions, not code. If Claude is ever seen deviating from them, that is the signal to revisit ADR 0003 and bring back a script for `apply`.

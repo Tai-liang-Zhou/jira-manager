@@ -100,7 +100,7 @@
 | 路徑 | 內容 |
 |---|---|
 | `~/.config/jira-manager/config.json` | base URL、專案 key，以及快取的 custom field ID。如果自動偵測抓錯欄位，可以直接在這裡修改。 |
-| `~/.config/jira-manager/profile/` | 保存 Jira 登入狀態的持久化瀏覽器 profile。**請把它當作帳密看待**：絕不 commit 或分享。刪除它就等於登出。 |
+| `~/.config/jira-manager/profile/` | 保存 Jira 登入狀態的持久化瀏覽器 profile。**請把它當作帳密看待**：絕不 commit 或分享。Skill 會把 `~/.config/jira-manager` 維持在 `chmod 700`。刪除它就等於登出。 |
 
 ## 疑難排解
 
